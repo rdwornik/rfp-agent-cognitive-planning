@@ -1,0 +1,56 @@
+# --- Python artifacts ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+*.env
+
+# --- IDE / editor ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs / cache ---
+*.log
+.ipynb_checkpoints/
+.pytest_cache/
+
+# --- RFP INPUT / OUTPUT (customer data!) ---
+input_rfp/
+input_rfp_test/
+output_rfp_gemini/
+output_rfp_gemini_test/
+tmp_rfps_to_be_answered/
+
+# --- KB data (raw + canonical) ---
+# These files almost certainly contain sensitive/internal info.
+# Keep them OUT of a public repo. If your GitHub repo is private
+# and you want them versioned, comment these lines out.
+data_kb/raw/
+data_kb/canonical/
+
+# Top-level KB working files & exports
+RFP_Database_Cognitive_Planning*.csv
+RFP_Database_Cognitive_Planning*.json
+RFP_Database_Cognitive_Planning*.jsonl
+RFP_Database_Cognitive_Planning*.xlsx
+
+# --- Local helper lists (not needed in Git) ---
+project_files.txt
+project_tree.txt
