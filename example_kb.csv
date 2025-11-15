@@ -1,0 +1,6 @@
+question,answer,category
+What is your data retention policy?,We retain customer data for 7 years in compliance with industry standards and regulations. Data can be exported or deleted upon request.,Compliance
+Do you support SSO?,Yes we support SAML 2.0 and OAuth 2.0 based SSO integration with major identity providers including Okta Azure AD and Google Workspace.,Security
+What is your SLA for uptime?,We guarantee 99.9% uptime with a service credit policy. Our infrastructure is deployed across multiple availability zones for high availability.,Infrastructure
+How do you handle data encryption?,All data is encrypted at rest using AES-256 and in transit using TLS 1.3. Encryption keys are managed through AWS KMS.,Security
+What compliance certifications do you have?,We are SOC 2 Type II GDPR and HIPAA compliant. We conduct annual audits and maintain documentation.,Compliance
