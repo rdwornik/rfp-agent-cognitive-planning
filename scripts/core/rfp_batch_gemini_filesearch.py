@@ -1,3 +1,26 @@
+"""
+rfp_batch_gemini_filesearch.py
+
+Main batch engine for answering RFP CSVs using the canonical KB + Gemini File Search.
+
+Usage (from repo root):
+  # Test mode (small sample CSVs)
+  python scripts/core/rfp_batch_gemini_filesearch.py test
+
+  # Prod mode (full RFP files)
+  python scripts/core/rfp_batch_gemini_filesearch.py
+
+Behaviour:
+  - Reads CSV files from:
+      input_rfp_test/  (MODE = 'test')
+      input_rfp/       (MODE = 'prod')
+  - For each row, derives customer_question_out from the input columns
+  - Calls Gemini with the canonical KB (File Search store) to generate kb_answer
+  - Writes clean, Excel-friendly CSVs to:
+      output_rfp_gemini_test/
+      output_rfp_gemini/
+"""
+
 import os
 import time
 import csv
@@ -14,10 +37,13 @@ FILE_SEARCH_STORE_NAME = "fileSearchStores/rfpcognitiveplanningkbv2-6pqup4g1x9sm
 MODEL_NAME = "gemini-2.5-flash"
 OUTPUT_SUFFIX = "_answers_gemini"
 
-# Project root = one level above the scripts/ folder
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# __file__ = .../scripts/core/rfp_batch_gemini_filesearch.py
+# parents[0] = scripts/core
+# parents[1] = scripts
+# parents[2] = repo root  ✅
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# System prompt lives in the project root:
+# System prompt lives under prompts_instructions/ at the root
 SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts_instructions" / "rfp_system_prompt.txt"
 
 # MODE: "prod" (default) or "test" (if first CLI arg == "test")
@@ -34,7 +60,7 @@ else:
 # ==============
 
 
-def load_system_instructions(path: str = SYSTEM_PROMPT_PATH) -> str:
+def load_system_instructions(path: Path = SYSTEM_PROMPT_PATH) -> str:
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -55,7 +81,6 @@ def build_tools():
 
 def get_response_text(response) -> str:
     """Extract plain text from GenerateContentResponse."""
-    # Newer SDKs often give you .text directly
     if getattr(response, "text", None):
         return response.text
 
@@ -90,10 +115,8 @@ def clean_model_answer(raw: str) -> str:
 
     txt = str(raw).strip().replace("\r\n", "\n")
 
-    # Remove markdown fences, but keep inner content
     txt = txt.replace("```csv", "").replace("```", "")
 
-    # Remove any explicit CSV header lines or inline headers
     txt = re.sub(
         r"customer_question_out\s*,\s*kb_answer",
         "",
@@ -101,20 +124,15 @@ def clean_model_answer(raw: str) -> str:
         flags=re.IGNORECASE,
     )
 
-    # If there are obvious CSV lines, drop the first line if it looks like a header row
     lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
     if not lines:
         return ""
 
-    # If first line still looks like a header row, drop it
     if "customer_question_out" in lines[0].lower() and "kb_answer" in lines[0].lower():
         lines = lines[1:] or []
 
     txt = " ".join(lines).strip()
-
-    # Final whitespace normalisation
     txt = " ".join(txt.split())
-
     return txt
 
 
@@ -188,7 +206,6 @@ def call_model_for_row(
 
 
 def safe_str(val) -> str:
-    """Convert cell to string but treat NaN as empty."""
     if pd.isna(val):
         return ""
     return str(val)
@@ -202,7 +219,6 @@ def get_question_from_row(row: pd.Series) -> str:
       2) column containing both 'functionality' and 'requirement'
       3) column containing 'description'
     """
-    # 1) customer_question*
     for col in row.index:
         name_clean = col.replace(" ", "").replace("\n", "").lower()
         if "customer_question" in name_clean:
@@ -210,7 +226,6 @@ def get_question_from_row(row: pd.Series) -> str:
             if val and val.lower() != "nan":
                 return val
 
-    # 2) "Functionality/ Requirement"
     for col in row.index:
         name_clean = col.replace(" ", "").replace("\n", "").lower()
         if "functionality" in name_clean and "requirement" in name_clean:
@@ -218,7 +233,6 @@ def get_question_from_row(row: pd.Series) -> str:
             if val and val.lower() != "nan":
                 return val
 
-    # 3) Description
     for col in row.index:
         name_clean = col.replace(" ", "").replace("\n", "").lower()
         if "description" in name_clean:
@@ -234,7 +248,6 @@ def process_single_file(
 ):
     print(f"\n=== Processing file: {input_path.name} ===")
 
-    # Load input with encoding fallback
     try:
         df = pd.read_csv(input_path, encoding="utf-8")
     except UnicodeDecodeError:
@@ -252,7 +265,6 @@ def process_single_file(
         row_series = df.iloc[idx]
         question_text = get_question_from_row(row_series)
 
-        # spacer/header rows: keep empty cells (no 'nan')
         if not question_text:
             rows.append(("", ""))
             continue
@@ -272,7 +284,6 @@ def process_single_file(
         else:
             rows.append((question_text, answer_text))
 
-    # Write clean CSV – Excel friendly, no 'nan'
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
@@ -284,9 +295,9 @@ def process_single_file(
 
 
 def main():
-    base_dir = Path(__file__).resolve().parent
-    input_dir = base_dir / INPUT_DIR
-    output_dir = base_dir / OUTPUT_DIR
+    # Use the already-resolved root-based dirs
+    input_dir = INPUT_DIR
+    output_dir = OUTPUT_DIR
 
     input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -299,7 +310,6 @@ def main():
 
     base_system = load_system_instructions()
 
-    # Strong override: ignore CSV-output rules for this automation
     system_text = (
         "FOR THIS AUTOMATED TOOL:\n"
         "- The user sends a single-row CSV batch.\n"
@@ -313,6 +323,10 @@ def main():
     client = get_client()
     tools = build_tools()
 
+    print(f"Mode: {MODE}")
+    print(f"Project root: {PROJECT_ROOT}")
+    print(f"Input dir:  {input_dir}")
+    print(f"Output dir: {output_dir}")
     print(f"Found {len(csv_files)} input file(s) in {input_dir}:")
     for p in csv_files:
         print(f" - {p.name}")

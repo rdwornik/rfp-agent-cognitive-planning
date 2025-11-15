@@ -1,3 +1,15 @@
+"""
+gemini_key_test.py
+
+Minimal connectivity test for GEMINI_API_KEY and the Gemini API.
+
+Usage (from repo root):
+  python scripts/maintenance/gemini_key_test.py
+
+If everything is configured correctly, the script prints a short response
+from the model; otherwise it prints an error.
+"""
+
 import os
 from google import genai
 

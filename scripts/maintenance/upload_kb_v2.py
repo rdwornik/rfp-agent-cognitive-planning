@@ -1,3 +1,16 @@
+"""
+upload_kb_v2.py
+
+Legacy/auxiliary uploader for the *raw* KB into a File Search store.
+Kept for cases where you want to experiment with the non-canonical KB.
+
+Usage (from repo root):
+  python scripts/maintenance/upload_kb_v2.py
+
+Reads:
+  data_kb/raw/RFP_Database_Cognitive_Planning.json (or similar)
+"""
+
 from google import genai
 import time
 
