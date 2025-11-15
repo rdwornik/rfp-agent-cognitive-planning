@@ -59,3 +59,7 @@ project_tree.txt
 .github/
 
 # --- Ignore maintenance scripts that have been deleted ---
+
+# --- IGNORE ---
+RFP_Cognitive_Agent_Documentation.docx
+~$P_Cognitive_Agent_Documentation.docx
