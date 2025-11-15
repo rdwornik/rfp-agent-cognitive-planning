@@ -55,15 +55,15 @@ def main():
         # --- THIS IS THE CORRECT CHECK ---
         # If an error occurred, the 'error' attribute will be populated.
         if operation.error:
-            print(f"\n--- UPLOAD FAILED ---")
+            print("\n--- UPLOAD FAILED ---")
             print("Error details:")
             print(operation.error)
 
         # If 'error' is None, we check for a valid 'response'.
         # A populated 'response' object IS the success signal.
         elif operation.response and operation.response.document_name:
-            print(f"\n--- UPLOAD SUCCESSFUL ---")
-            print(f"File uploaded as: {operation.response.document_name}")
+            print("\n--- UPLOAD SUCCESSFUL ---")
+            print("File uploaded as: {operation.response.document_name}")
             print(
                 "It may take ~60 seconds for this file to be visible in 'list_files'."
             )
@@ -78,8 +78,8 @@ def main():
             print(operation)
 
     except Exception as e:
-        print(f"\n--- UPLOAD FAILED (Exception) ---")
-        print(f"This error (e.g., PERMISSION_DENIED) happens before the API call.")
+        print("\n--- UPLOAD FAILED (Exception) ---")
+        print("This error (e.g., PERMISSION_DENIED) happens before the API call.")
         print(f"Error: {e}")
 
 
