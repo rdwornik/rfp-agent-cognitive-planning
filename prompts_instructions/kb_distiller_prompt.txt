@@ -1,0 +1,55 @@
+Blue Yonder KB Distiller (Time-Aware, SaaS-First, Specific-When-Specific)
+
+You receive multiple historical RFP answers for similar questions, ordered by end_date
+from oldest to newest in the "rows" array.
+
+Your task:
+Produce ONE canonical, current answer suitable for a knowledge base, following these rules.
+
+1) TIME PRIORITY
+- Newer rows override older rows when there are conflicts in terminology, scope, or positioning.
+- Older rows may add detail ONLY if they do not contradict the newest rows.
+
+2) SPECIFIC vs GENERIC
+- If the clustered questions are specific (named regions, explicit deployment options,
+  concrete integration patterns) and the NEWEST row(s) provide those details, you MAY keep them.
+- Do NOT generalize away explicit facts that are clearly present in the newest row(s),
+  unless they are clearly deprecated or contradicted.
+- If the cluster is broad/generic, keep the canonical answer broad.
+
+3) DEPRECATED CONCEPTS & NAMING
+- Prefer the newest naming and positioning for:
+  - Blue Yonder platform, SaaS, Platform Data Cloud, integration approach, etc.
+- Treat legacy labels as deprecated when they appear only in older rows, such as:
+  - "Luminate platform", "Luminate Cognitive Platform",
+  - "Data Access Service", "DAS" (for integration),
+  - other legacy offer names not present in the newest rows.
+- Replace deprecated terms with current, generic wording consistent with the newest rows
+  (e.g. “data extraction capabilities”, “the platform data layer”) instead of legacy brands.
+
+4) CONTENT SCOPE & LENGTH
+- Use ONLY information from the provided rows; DO NOT invent new features, numbers, SLAs,
+  certifications, or commitments.
+- Style: SaaS-first, Blue Yonder platform-centric, pragmatic, configuration-focused.
+- First reference: “The Blue Yonder platform …” or “Blue Yonder’s platform …”.
+- Later references: “the platform”, “the solution”, “the service”.
+- You may use 1–2 short paragraphs. Max length ≈1600 characters.
+- Only use the full budget when there is real detail to keep.
+
+5) HIGH-RISK TOPICS (HANDLE CAREFULLY)
+- SLA/uptime values, RPO/RTO, certifications (ISO, SOC, etc.), data residency,
+  security architecture, upgrade cadence, custom code policy, PII/data protection:
+  - Include ONLY if clearly and consistently described in the newest rows.
+  - If older and newer rows conflict, follow the newest.
+  - If unclear, omit rather than speculate.
+
+6) OUTPUT FORMAT
+Return JSON ONLY (no markdown) with:
+
+{
+  "canonical_question": "<short, normalized question capturing the cluster>",
+  "canonical_answer": "<the distilled answer text>",
+  "last_updated": "YYYY-MM-DD",   // typically the latest end_date
+  "sources_used": ["row_00010", "row_00015"],
+  "deprecated_removed": ["...", "..."]
+}
