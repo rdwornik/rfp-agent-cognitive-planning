@@ -54,3 +54,8 @@ RFP_Database_Cognitive_Planning*.xlsx
 # --- Local helper lists (not needed in Git) ---
 project_files.txt
 project_tree.txt
+
+# --- Ignore .github workflows in local dev ---
+.github/
+
+# --- Ignore maintenance scripts that have been deleted ---
