@@ -1,93 +1,123 @@
-# RFP Agent – Cognitive Planning
+# RFP Answer Engine – Cognitive Planning (v0.1)
 
-An experimental **RFP Answer Engine** for Blue Yonder cognitive planning deals.
+This repo hosts an experimental **RFP answer engine** for Blue Yonder’s planning platform, focused on **Cognitive / SCP** RFPs.
 
-The goal of this project is to:
-1. Build a **canonical, de-duplicated knowledge base (KB)** from many historical RFP answers.
-2. Upload that KB into a **Gemini File Search Store**.
-3. Use that KB + a controlled system prompt to **auto-draft answers** to customer RFP CSVs.
+The idea:  
+Take historical presales answers → build a **canonical KB** → let Gemini + File Search draft answers for new RFPs in **CSV/Excel** form, in a way that is:
 
-This repo is designed so that:
-- Humans can understand and modify the flow.
-- Different LLMs (ChatGPT, Gemini, Grok, etc.) can safely help evolve the code and prompts.
+- **KB-first**: no hallucinated product facts.
+- **Batch-oriented**: works well with Excel exports.
+- **Auditable**: easy to review, tweak, and re-run.
 
----
-
-## High-Level Architecture
-
-There are three main workflows:
-
-1. **Canonical KB Build**  
-   Source of truth: `data_kb/raw/RFP_Database_Cognitive_Planning.csv`  
-   - Group similar questions by `Category` + normalized question text.  
-   - For each cluster, call Gemini once to **distill a single canonical answer**, taking
-     the **newest End Date** as authoritative and treating older answers as “supporting detail”.  
-   - Output: `data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json`  
-   - This JSON is what gets uploaded to the File Search store.
-
-2. **KB Upload to Gemini File Search Store**  
-   - Take the canonical JSON file and upload it into an existing  
-     `FILE_SEARCH_STORE_NAME` using the `google.genai` SDK.
-   - This store is then used by the batch RFP answering script.
-
-3. **Batch RFP Answering (CSV → CSV)**  
-   - Input: customer RFPs as CSVs (various column layouts).  
-   - For each non-empty “question-like” row:
-     - Derive a `customer_question_out` from the row
-       (prefer `customer_question`, otherwise fall back to `Functionality/Requirement`, then `description`).
-     - Call Gemini with:
-       - The **system prompt**: `prompts_instructions/rfp_system_prompt.txt`
-       - The File Search tool bound to your canonical KB.
-     - Expect back a **single paragraph** answer only.
-   - Output: simple, Excel-friendly CSV with two columns:  
-     `customer_question_out,kb_answer`.
-
-All **customer data** and **KB content** stay local and are `.gitignore`’d so the GitHub repo
-only contains code, prompts, and project scaffolding.
+We’re not “done”; this is a solid v0.1 with a clear, known limitation: **Gemini still struggles to consistently pull the full 1–2k-character canonical answers into the final RFP answers**. That’s the main open problem for the next iteration.
 
 ---
 
-## Repo Layout
+## High-level architecture
+
+### 1. Canonical KB builder
+
+**Script:** `scripts/core/kb_build_canonical.py`  
+**Source:** `data_kb/raw/RFP_Database_Cognitive_Planning.csv`  
+**Output:** `data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json`
+
+Pipeline:
+
+1. Load raw historical RFP answers (Cognitive / SCP scope).
+2. Normalize and cluster **similar questions** by:
+   - Solution / category / subcategory
+   - Normalized question text
+3. For each cluster:
+   - Ask Gemini to **distill a single canonical_answer**, respecting:
+     - Newer “End Date” answers override older ones.
+     - Tech Presales answers are preferred where available.
+4. Write a canonical, de-duplicated KB JSON file.
+
+This JSON is then loaded into a **Google Gemini File Search store**, which becomes the **only source of product truth** for the batch answering scripts.
+
+---
+
+### 2. Batch RFP answer engine (CSV in → CSV out)
+
+**Script:** `scripts/core/rfp_batch_gemini_filesearch.py`  
+**Inputs:**
+
+- CSVs exported from Excel:
+  - `input_rfp/`         (prod)
+  - `input_rfp_test/`    (test)
+- Environment:
+  - `GEMINI_API_KEY` set
+  - File Search store name:  
+    `fileSearchStores/rfpcognitiveplanningkbv2-6pqup4g1x9sm`
+- System prompt: `prompts_instructions/rfp_system_prompt.txt`
+
+**Outputs:**
+
+- `output_rfp_gemini/`  
+- `output_rfp_gemini_test/`  
+Each file:  
+`<input_name>_answers_gemini.csv`
+
+#### What the engine does per row
+
+1. **Extract the question** from the RFP row using header heuristics:
+
+   Priority:
+   1. First non-empty column whose header contains `customer_question`
+   2. Else first non-empty column whose header contains **both** `functionality` and `requirement`
+   3. Else first non-empty column whose header contains `description`
+
+   If no such column has text → we treat it as a **blank question row** and emit an empty output row (to keep the CSV aligned with Excel).
+
+2. **Strict KB-first call (Gemini + File Search)**
+
+   - Use the system prompt (`rfp_system_prompt.txt`) which enforces:
+     - Canonical KB as **only** source of product facts.
+     - Copy-first behaviour from `canonical_answer`.
+     - SaaS-first, no new SLAs, no made-up certifications.
+   - Model returns **one single-line kb_answer** (no headers, no CSV).
+
+3. **Relaxed fallback when needed**
+
+   - If the strict pass fails technically or responds with `Not in KB`, we:
+     - Retry in **RELAXED FALLBACK MODE**:
+       - Model may use generic SaaS / planning domain knowledge.
+       - Must prefix answer with `[MODEL-GUESS] `.
+       - Must stay high-level and conservative (no new numbers / SLAs).
+   - If relaxed also fails:
+     - We return a safe error text like `[Error v1] …`.
+
+4. **Multi-variant answers per row**
+
+   For each question we generate **three independent variants**:
+
+   - `kb_answer_1`
+   - `kb_answer_2`
+   - `kb_answer_3`
+
+   Each variant runs the strict-then-relaxed logic independently, so you get slightly different wording and emphasis. This is intentional: the human reviewer can pick their preferred version or use them as material to refine.
+
+5. **Fusion step: aggregate the 3 variants into `kb_answer_final`**
+
+   We run a **separate Gemini call** to fuse the three variants into a single answer:
+
+   - Goal is to create a **UNION of details**, not a minimal summary.
+   - Rules:
+     - Include **all non-contradictory technical details** that appear in *any* variant:  
+       PDC, BYDM, Workflow Orchestrator, Data Functions, Snowflake Secure Data Share, SFTP/AS2, Teams/SharePoint integration, etc.
+     - Only deduplicate exact / obvious rephrasings.
+     - Resolve contradictions by keeping the safest high-level statement and dropping conflicting specifics.
+     - Treat `[MODEL-GUESS]` content as **lower trust**; only include it if generic and clearly safe.
+     - Strip `[MODEL-GUESS]` from the final answer.
+   - Output: `kb_answer_final` – one CSV-safe, single-line RFP answer.
+
+6. **Parallel execution**
+
+   - Rows are processed in parallel using a `ThreadPoolExecutor`.
+   - Each worker thread has its own Gemini client (thread-local) to avoid issues with shared state.
+   - `RFP_MAX_WORKERS` env var controls parallelism (default `4`).
+
+Final CSV columns:
 
 ```text
-repo-root/
-  data_kb/
-    raw/         # raw, messy RFP KB (NOT tracked in git by default)
-    canonical/   # distilled canonical KB JSON (also ignored by default)
-
-  input_rfp/           # full / production RFP CSVs (ignored)
-  input_rfp_test/      # small test CSVs for debugging (ignored)
-  output_rfp_gemini/   # batch outputs for prod (ignored)
-  output_rfp_gemini_test/ # batch outputs for test (ignored)
-
-  prompts_instructions/
-    rfp_system_prompt.txt       # main system prompt for answering RFPs
-    kb_distiller_prompt.txt     # system prompt for canonical KB distillation
-    ... possibly other prompt drafts
-
-  scripts/
-    core/
-      kb_build_canonical.py         # build canonical KB (raw → canonical JSON)
-      rfp_batch_gemini_filesearch.py# batch-answer RFP CSVs using File Search
-      rfp_query_test.py             # quick single-question KB sanity check
-      excel_to_jsonl.py             # helper to convert Excel/CSV → JSON/JSONL
-
-    maintenance/
-      create_store_v2.py            # create File Search store (one-time / rare)
-      gemini_key_test.py            # test GEMINI_API_KEY & basic API connectivity
-      upload_canonical_kb.py        # upload canonical JSON to File Search store
-      upload_kb_v2.py               # upload raw KB (older / experimental)
-
-    archive/
-      create_canonical_store.py     # older, superseded scripts
-      create_new_store_v2.py
-      setup_rfp_file_search_store.py
-      upload_kb_to_store.py
-
-  tmp_rfps_to_be_answered/   # local parking lot of RFPs you haven’t run yet (ignored)
-
-  .gitignore
-  README.md
-  requirements.txt
-  project_tree.txt
-  project_files.txt
+customer_question_out,kb_answer_1,kb_answer_2,kb_answer_3,kb_answer_final

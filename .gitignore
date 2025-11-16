@@ -36,6 +36,7 @@ input_rfp/
 input_rfp_test/
 output_rfp_gemini/
 output_rfp_gemini_test/
+output_rfp_gemini_test_flagged
 tmp_rfps_to_be_answered/
 
 # --- KB data (raw + canonical) ---
@@ -63,3 +64,4 @@ project_tree.txt
 # --- IGNORE ---
 RFP_Cognitive_Agent_Documentation.docx
 ~$P_Cognitive_Agent_Documentation.docx
+rfp_system_prompt_v*.txt

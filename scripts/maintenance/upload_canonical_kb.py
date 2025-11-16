@@ -63,7 +63,7 @@ def main():
         # A populated 'response' object IS the success signal.
         elif operation.response and operation.response.document_name:
             print("\n--- UPLOAD SUCCESSFUL ---")
-            print("File uploaded as: {operation.response.document_name}")
+            print(f"File uploaded as: {operation.response.document_name}")
             print(
                 "It may take ~60 seconds for this file to be visible in 'list_files'."
             )

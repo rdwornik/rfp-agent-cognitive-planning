@@ -10,6 +10,7 @@ Pipeline (from repo root):
     (time-aware: newer End Date answers override older ones)
   - Write canonical KB to:
       data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json
+      data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.csv
 
 Notes:
 - The JSON file is the source of truth that will be uploaded into
@@ -37,20 +38,34 @@ RAW_KB_DIR = PROJECT_ROOT / "data_kb" / "raw"
 CANONICAL_KB_DIR = PROJECT_ROOT / "data_kb" / "canonical"
 
 RAW_CSV_PATH = RAW_KB_DIR / "RFP_Database_Cognitive_Planning.csv"
+
 CANONICAL_JSON_PATH = (
     CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.json"
 )
+CANONICAL_CSV_PATH = CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.csv"
 
 DISTILLER_PROMPT_PATH = (
     PROJECT_ROOT / "prompts_instructions" / "kb_distiller_prompt.txt"
 )
 
-MAX_CANONICAL_CHARS = 1600  # your requested limit
-CANONICAL_MODEL_NAME = "gemini-2.5-flash"  # aligned with your batch script
+# Allow long, rich answers. You can bump further if needed.
+MAX_CANONICAL_CHARS = 6000
 
-# How many clusters to distill in parallel.
-# If you see a lot of 503s, drop this to 4–6.
-MAX_WORKERS = 8
+# Use Pro for high-quality, detail-preserving distillation
+CANONICAL_MODEL_NAME = "gemini-2.5-pro"
+
+# PERFORMANCE: parallelism & payload size tuning
+MAX_WORKERS = int(os.environ.get("KB_MAX_WORKERS", "8"))
+
+# Cap how many rows we send to Gemini per cluster (newest N rows).
+# Set KB_MAX_ROWS_PER_CLUSTER=0 to disable and send all rows.
+MAX_ROWS_PER_CLUSTER = int(os.environ.get("KB_MAX_ROWS_PER_CLUSTER", "8"))
+
+# Control verbosity – per-cluster prints off by default for speed
+VERBOSE = os.environ.get("KB_VERBOSE", "0") == "1"
+
+# How often to print progress (in completed clusters)
+PROGRESS_EVERY = int(os.environ.get("KB_PROGRESS_EVERY", "1"))
 
 # Thread-local Gemini clients (one per worker thread)
 _thread_local = threading.local()
@@ -167,8 +182,21 @@ def load_raw_df(path: Path) -> tuple[pd.DataFrame, dict]:
     return df, meta
 
 
-def build_cluster_payload(cluster_id: str, rows: pd.DataFrame, meta: dict) -> dict:
+def build_cluster_payload(
+    cluster_id: str, rows: pd.DataFrame, meta: dict
+) -> tuple[dict, pd.Series]:
+    """
+    Build the JSON payload sent to the distiller AND return the newest row.
+
+    PERFORMANCE:
+    - Sort once by _end_dt (oldest → newest).
+    - Optionally cap to the newest MAX_ROWS_PER_CLUSTER rows to keep
+      payloads small without losing the most relevant information.
+    """
     rows_sorted = rows.sort_values(by="_end_dt", ascending=True)
+
+    if MAX_ROWS_PER_CLUSTER > 0 and len(rows_sorted) > MAX_ROWS_PER_CLUSTER:
+        rows_sorted = rows_sorted.iloc[-MAX_ROWS_PER_CLUSTER:]
 
     payload_rows = []
     for _, r in rows_sorted.iterrows():
@@ -192,13 +220,19 @@ def build_cluster_payload(cluster_id: str, rows: pd.DataFrame, meta: dict) -> di
             }
         )
 
-    first = rows_sorted.iloc[0]
-    return {
+    # newest row after any trimming
+    newest = rows_sorted.iloc[-1]
+
+    payload = {
         "cluster_id": cluster_id,
-        "category": first.get(meta["col_category"], "") if meta["col_category"] else "",
-        "subcategory": first.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
+        "category": newest.get(meta["col_category"], "")
+        if meta["col_category"]
+        else "",
+        "subcategory": newest.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
         "rows": payload_rows,
     }
+
+    return payload, newest
 
 
 # ---------- Gemini distiller call ----------
@@ -274,10 +308,11 @@ def process_single_cluster(args) -> dict | None:
         return None
 
     cluster_id = f"cluster_{i:04d}"
-    print(f"Processing {cluster_id} (rows={len(rows)}) ...")
 
-    payload = build_cluster_payload(cluster_id, rows, meta)
-    newest = rows.sort_values(by="_end_dt", ascending=True).iloc[-1]
+    if VERBOSE:
+        print(f"Processing {cluster_id} (rows={len(rows)}) ...")
+
+    payload, newest = build_cluster_payload(cluster_id, rows, meta)
 
     try:
         client = get_gemini_client()
@@ -290,6 +325,11 @@ def process_single_cluster(args) -> dict | None:
         print(f"  ⚠️ Distillation failed for {cluster_id}: {e}")
         return None
 
+    # Get answer text and apply optional length cap
+    answer_text = distilled.get("canonical_answer", "").strip()
+    if MAX_CANONICAL_CHARS and MAX_CANONICAL_CHARS > 0:
+        answer_text = answer_text[:MAX_CANONICAL_CHARS]
+
     canonical_record = {
         "kb_id": f"kb_{i:04d}",
         "category": newest.get(meta["col_category"], "")
@@ -297,9 +337,7 @@ def process_single_cluster(args) -> dict | None:
         else "",
         "subcategory": newest.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
         "canonical_question": distilled.get("canonical_question", "").strip(),
-        "canonical_answer": distilled.get("canonical_answer", "").strip()[
-            :MAX_CANONICAL_CHARS
-        ],
+        "canonical_answer": answer_text,
         "last_updated": distilled.get(
             "last_updated", str(newest.get(meta["col_end_date"], ""))
         ),
@@ -330,6 +368,10 @@ def main():
     total_clusters = len(group)
     print(f"Total rows: {len(df)}")
     print(f"Total clusters: {total_clusters}")
+    print(
+        f"Using {MAX_WORKERS} workers, "
+        f"MAX_ROWS_PER_CLUSTER={MAX_ROWS_PER_CLUSTER if MAX_ROWS_PER_CLUSTER > 0 else 'no limit'}"
+    )
 
     # Prepare work items
     tasks = []
@@ -338,24 +380,63 @@ def main():
 
     canonical_records: list[dict] = []
 
-    print(f"\nStarting parallel distillation with {MAX_WORKERS} workers...")
+    print("\nStarting parallel distillation...")
+    t0 = time.time()
 
-    # Run clusters in parallel
+    # Run clusters in parallel with progress reporting
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        for rec in executor.map(process_single_cluster, tasks):
+        future_to_idx = {
+            executor.submit(process_single_cluster, task): idx
+            for idx, task in enumerate(tasks, start=1)
+        }
+
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                rec = future.result()
+            except Exception as e:
+                print(f"  ⚠️ Cluster {idx:04d} raised an exception: {e}")
+                rec = None
+
             if rec:
                 canonical_records.append(rec)
 
-    print(f"\nFinished processing. {len(canonical_records)} canonical records created.")
+            completed += 1
+            if completed % PROGRESS_EVERY == 0 or completed == total_clusters:
+                pct = completed * 100.0 / total_clusters
+                print(f"  Progress: {completed}/{total_clusters} clusters ({pct:.1f}%)")
+
+    elapsed = time.time() - t0
+    print(
+        f"\nFinished processing. {len(canonical_records)} canonical records created "
+        f"in {elapsed:.1f}s "
+        f"(~{elapsed / max(1, len(canonical_records)):.2f}s/record)."
+    )
 
     # Sort for stable output order
     canonical_records.sort(key=lambda r: r["kb_id"])
 
-    # Write JSON array (valid JSON)
+    # --- JSON output (for File Search) ---
     with CANONICAL_JSON_PATH.open("w", encoding="utf-8") as f_json:
         json.dump(canonical_records, f_json, ensure_ascii=False, indent=2)
 
     print(f"\n✅ Canonical JSON written to: {CANONICAL_JSON_PATH}")
+
+    # --- CSV output (for manual inspection) ---
+    if canonical_records:
+        df_can = pd.DataFrame(canonical_records)
+
+        # Flatten list fields for CSV readability
+        for col in ("source_rows", "deprecated_removed"):
+            if col in df_can.columns:
+                df_can[col] = df_can[col].apply(
+                    lambda v: ";".join(map(str, v)) if isinstance(v, list) else str(v)
+                )
+
+        # utf-8-sig so Excel opens it correctly (no â€™ garbage)
+        df_can.to_csv(CANONICAL_CSV_PATH, index=False, encoding="utf-8-sig")
+        print(f"✅ Canonical CSV written to:  {CANONICAL_CSV_PATH}")
 
 
 if __name__ == "__main__":
