@@ -10,17 +10,22 @@ Pipeline (from repo root):
     (time-aware: newer End Date answers override older ones)
   - Write canonical KB to:
       data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json
+      data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.csv
 
-This file is the source of truth that will later be uploaded into
-the Gemini File Search store.
+Notes:
+- The JSON file is the source of truth that will be uploaded into
+  the Gemini File Search store.
+- Distillation behaviour is controlled by:
+    prompts_instructions/kb_distiller_prompt.txt
 """
 
-import csv
 import json
 import os
 import re
 import time
 from pathlib import Path
+import concurrent.futures
+import threading
 
 import pandas as pd
 from google import genai
@@ -33,12 +38,49 @@ RAW_KB_DIR = PROJECT_ROOT / "data_kb" / "raw"
 CANONICAL_KB_DIR = PROJECT_ROOT / "data_kb" / "canonical"
 
 RAW_CSV_PATH = RAW_KB_DIR / "RFP_Database_Cognitive_Planning.csv"
-CANONICAL_CSV_PATH = CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.csv"
+
 CANONICAL_JSON_PATH = (
     CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.json"
 )
+CANONICAL_CSV_PATH = CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.csv"
 
-MAX_CANONICAL_CHARS = 1600  # your requested limit
+DISTILLER_PROMPT_PATH = (
+    PROJECT_ROOT / "prompts_instructions" / "kb_distiller_prompt.txt"
+)
+
+# Allow long, rich answers. You can bump further if needed.
+MAX_CANONICAL_CHARS = 6000
+
+# Use Pro for high-quality, detail-preserving distillation
+CANONICAL_MODEL_NAME = "gemini-2.5-pro"
+
+# PERFORMANCE: parallelism & payload size tuning
+MAX_WORKERS = int(os.environ.get("KB_MAX_WORKERS", "8"))
+
+# Cap how many rows we send to Gemini per cluster (newest N rows).
+# Set KB_MAX_ROWS_PER_CLUSTER=0 to disable and send all rows.
+MAX_ROWS_PER_CLUSTER = int(os.environ.get("KB_MAX_ROWS_PER_CLUSTER", "8"))
+
+# Control verbosity – per-cluster prints off by default for speed
+VERBOSE = os.environ.get("KB_VERBOSE", "0") == "1"
+
+# How often to print progress (in completed clusters)
+PROGRESS_EVERY = int(os.environ.get("KB_PROGRESS_EVERY", "1"))
+
+# Thread-local Gemini clients (one per worker thread)
+_thread_local = threading.local()
+
+
+def get_gemini_client() -> genai.Client:
+    """Return a per-thread Gemini client (avoids sharing a single client across threads)."""
+    client = getattr(_thread_local, "client", None)
+    if client is None:
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set.")
+        client = genai.Client(api_key=api_key)
+        _thread_local.client = client
+    return client
 
 
 # ---------- helpers for headers & normalization ----------
@@ -76,7 +118,14 @@ def normalize_question_text(q: str) -> str:
     return q
 
 
-# ---------- load & cluster raw CSV ----------
+# ---------- load prompt & raw CSV ----------
+
+
+def load_distiller_prompt(path: Path = DISTILLER_PROMPT_PATH) -> str:
+    if not path.exists():
+        raise FileNotFoundError(f"Distiller prompt not found: {path}")
+    with path.open("r", encoding="utf-8") as f:
+        return f.read()
 
 
 def load_raw_df(path: Path) -> tuple[pd.DataFrame, dict]:
@@ -133,8 +182,21 @@ def load_raw_df(path: Path) -> tuple[pd.DataFrame, dict]:
     return df, meta
 
 
-def build_cluster_payload(cluster_id: str, rows: pd.DataFrame, meta: dict) -> dict:
+def build_cluster_payload(
+    cluster_id: str, rows: pd.DataFrame, meta: dict
+) -> tuple[dict, pd.Series]:
+    """
+    Build the JSON payload sent to the distiller AND return the newest row.
+
+    PERFORMANCE:
+    - Sort once by _end_dt (oldest → newest).
+    - Optionally cap to the newest MAX_ROWS_PER_CLUSTER rows to keep
+      payloads small without losing the most relevant information.
+    """
     rows_sorted = rows.sort_values(by="_end_dt", ascending=True)
+
+    if MAX_ROWS_PER_CLUSTER > 0 and len(rows_sorted) > MAX_ROWS_PER_CLUSTER:
+        rows_sorted = rows_sorted.iloc[-MAX_ROWS_PER_CLUSTER:]
 
     payload_rows = []
     for _, r in rows_sorted.iterrows():
@@ -158,80 +220,39 @@ def build_cluster_payload(cluster_id: str, rows: pd.DataFrame, meta: dict) -> di
             }
         )
 
-    first = rows_sorted.iloc[0]
-    return {
+    # newest row after any trimming
+    newest = rows_sorted.iloc[-1]
+
+    payload = {
         "cluster_id": cluster_id,
-        "category": first.get(meta["col_category"], "") if meta["col_category"] else "",
-        "subcategory": first.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
+        "category": newest.get(meta["col_category"], "")
+        if meta["col_category"]
+        else "",
+        "subcategory": newest.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
         "rows": payload_rows,
     }
 
+    return payload, newest
 
-# ---------- Gemini distiller instructions ----------
 
-DISTILLER_SYSTEM = f"""
-Blue Yonder KB Distiller (Time-Aware, SaaS-First, Specific-When-Specific)
-
-You receive multiple historical RFP answers for similar questions, ordered by end_date
-from oldest to newest in the "rows" array.
-
-Your task:
-Produce ONE canonical, current answer suitable for a knowledge base, following these rules.
-
-1) TIME PRIORITY
-- Newer rows override older rows when there are conflicts in terminology, scope, or positioning.
-- Older rows may add detail ONLY if they do not contradict the newest rows.
-
-2) SPECIFIC vs GENERIC
-- If the clustered questions are specific (e.g., named regions, explicit deployment options,
-  concrete integration methods) and the NEWEST row(s) provide those details, you MAY keep them.
-- Do NOT generalize away explicit facts that are clearly present in the newest row(s),
-  unless they are obviously deprecated or contradicted.
-- If the KB content is broad/generic, keep the canonical answer broad.
-
-3) DEPRECATED CONCEPTS & NAMING
-- Prefer the newest naming and positioning for:
-  - Blue Yonder platform, SaaS, Platform Data Cloud, integration approach, etc.
-- Treat legacy labels as deprecated when they appear only in older rows, such as:
-  - "Luminate platform", "Luminate Cognitive Platform",
-  - "Data Access Service", "DAS" (for integration),
-  - other legacy offer names not present in the newest rows.
-- Replace deprecated terms with current, generic wording consistent with the newest rows
-  (e.g. "data extraction capabilities", "the platform data layer") rather than legacy brands.
-
-4) CONTENT SCOPE & LENGTH
-- Use ONLY information from the provided rows; DO NOT invent new features, numbers, SLAs,
-  certifications, or commitments.
-- Style: SaaS-first, Blue Yonder platform-centric, pragmatic, configuration-focused.
-- First reference: "The Blue Yonder platform ..." or "Blue Yonder’s platform ...".
-- Later references: "the platform", "the solution", "the service".
-- One compact paragraph, up to ~{MAX_CANONICAL_CHARS} characters. Shorter is fine
-  if that covers the content; only use the full budget when there is real detail to keep.
-
-5) HIGH-RISK TOPICS (HANDLE CAREFULLY)
-- SLA/uptime values, RPO/RTO, certifications (ISO, SOC, etc.), data residency,
-  security architecture, upgrade cadence, custom code policy, PII/data protection:
-  - Include ONLY if clearly and consistently described in the newest rows.
-  - If older and newer rows conflict, follow the newest.
-  - If unclear, omit rather than speculate.
-
-6) OUTPUT FORMAT
-Return JSON ONLY (no markdown) with:
-{{
-  "canonical_question": "<short, normalized question capturing the cluster>",
-  "canonical_answer": "<the distilled answer text>",
-  "last_updated": "YYYY-MM-DD",   // typically the latest end_date
-  "sources_used": ["row_00010", "row_00015"],
-  "deprecated_removed": ["...", "..."]
-}}
-""".strip()
+# ---------- Gemini distiller call ----------
 
 
 def call_gemini_distiller(
-    client: genai.Client, cluster_payload: dict, max_retries: int = 5
+    client: genai.Client,
+    distiller_prompt: str,
+    cluster_payload: dict,
+    max_retries: int = 5,
 ) -> dict:
+    """
+    Call Gemini to distill one cluster into a canonical Q/A.
+
+    - Uses the external kb_distiller_prompt.txt as 'distiller_prompt'.
+    - Asks the model to return strict JSON (response_mime_type='application/json').
+    """
+
     user_text = (
-        DISTILLER_SYSTEM
+        distiller_prompt
         + "\n\n=== CLUSTER PAYLOAD (JSON) ===\n"
         + json.dumps(cluster_payload, ensure_ascii=False)
     )
@@ -239,13 +260,8 @@ def call_gemini_distiller(
     for attempt in range(max_retries):
         try:
             resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=[
-                    {
-                        "role": "user",
-                        "parts": [{"text": user_text}],
-                    }
-                ],
+                model=CANONICAL_MODEL_NAME,
+                contents=[{"role": "user", "parts": [{"text": user_text}]}],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
                 ),
@@ -270,8 +286,66 @@ def call_gemini_distiller(
                 time.sleep(wait)
                 continue
             raise
+
         except Exception:
             raise
+
+
+# ---------- per-cluster worker (for parallelism) ----------
+
+
+def process_single_cluster(args) -> dict | None:
+    """
+    Worker function executed in parallel for each cluster.
+
+    args = (i, rows, meta, distiller_prompt)
+    Returns a canonical_record dict or None if skipped/failed.
+    """
+    i, rows, meta, distiller_prompt = args
+
+    # Skip clusters with empty normalized question
+    if not rows["_q_norm"].iloc[0]:
+        return None
+
+    cluster_id = f"cluster_{i:04d}"
+
+    if VERBOSE:
+        print(f"Processing {cluster_id} (rows={len(rows)}) ...")
+
+    payload, newest = build_cluster_payload(cluster_id, rows, meta)
+
+    try:
+        client = get_gemini_client()
+        distilled = call_gemini_distiller(
+            client=client,
+            distiller_prompt=distiller_prompt,
+            cluster_payload=payload,
+        )
+    except Exception as e:
+        print(f"  ⚠️ Distillation failed for {cluster_id}: {e}")
+        return None
+
+    # Get answer text and apply optional length cap
+    answer_text = distilled.get("canonical_answer", "").strip()
+    if MAX_CANONICAL_CHARS and MAX_CANONICAL_CHARS > 0:
+        answer_text = answer_text[:MAX_CANONICAL_CHARS]
+
+    canonical_record = {
+        "kb_id": f"kb_{i:04d}",
+        "category": newest.get(meta["col_category"], "")
+        if meta["col_category"]
+        else "",
+        "subcategory": newest.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
+        "canonical_question": distilled.get("canonical_question", "").strip(),
+        "canonical_answer": answer_text,
+        "last_updated": distilled.get(
+            "last_updated", str(newest.get(meta["col_end_date"], ""))
+        ),
+        "source_rows": distilled.get("sources_used", []),
+        "deprecated_removed": distilled.get("deprecated_removed", []),
+    }
+
+    return canonical_record
 
 
 # ---------- main ----------
@@ -281,9 +355,12 @@ def main():
     if not RAW_CSV_PATH.exists():
         raise FileNotFoundError(f"Raw KB CSV not found: {RAW_CSV_PATH}")
 
-    df, meta = load_raw_df(RAW_CSV_PATH)
+    # Fail fast if key missing
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise RuntimeError("GEMINI_API_KEY is not set.")
 
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    df, meta = load_raw_df(RAW_CSV_PATH)
+    distiller_prompt = load_distiller_prompt()
 
     CANONICAL_KB_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -291,81 +368,75 @@ def main():
     total_clusters = len(group)
     print(f"Total rows: {len(df)}")
     print(f"Total clusters: {total_clusters}")
+    print(
+        f"Using {MAX_WORKERS} workers, "
+        f"MAX_ROWS_PER_CLUSTER={MAX_ROWS_PER_CLUSTER if MAX_ROWS_PER_CLUSTER > 0 else 'no limit'}"
+    )
+
+    # Prepare work items
+    tasks = []
+    for i, (_, rows) in enumerate(group, start=1):
+        tasks.append((i, rows, meta, distiller_prompt))
 
     canonical_records: list[dict] = []
-    csv_rows: list[list[str]] = []
 
-    for i, (cluster_key, rows) in enumerate(group, start=1):
-        if not rows["_q_norm"].iloc[0]:
-            continue
+    print("\nStarting parallel distillation...")
+    t0 = time.time()
 
-        cluster_id = f"cluster_{i:04d}"
-        print(f"Processing {cluster_id} (rows={len(rows)}) ...")
-
-        payload = build_cluster_payload(cluster_id, rows, meta)
-        newest = rows.sort_values(by="_end_dt", ascending=True).iloc[-1]
-
-        try:
-            distilled = call_gemini_distiller(client, payload)
-        except Exception as e:
-            print(f"  ⚠️ Distillation failed for {cluster_id}: {e}")
-            continue
-
-        canonical_record = {
-            "kb_id": f"kb_{i:04d}",
-            "category": newest.get(meta["col_category"], "")
-            if meta["col_category"]
-            else "",
-            "subcategory": newest.get(meta["col_subcat"], "")
-            if meta["col_subcat"]
-            else "",
-            "canonical_question": distilled.get("canonical_question", "").strip(),
-            "canonical_answer": distilled.get("canonical_answer", "").strip()[
-                :MAX_CANONICAL_CHARS
-            ],
-            "last_updated": distilled.get(
-                "last_updated", str(newest.get(meta["col_end_date"], ""))
-            ),
-            "source_rows": distilled.get("sources_used", []),
-            "deprecated_removed": distilled.get("deprecated_removed", []),
+    # Run clusters in parallel with progress reporting
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_idx = {
+            executor.submit(process_single_cluster, task): idx
+            for idx, task in enumerate(tasks, start=1)
         }
 
-        canonical_records.append(canonical_record)
+        completed = 0
+        for future in concurrent.futures.as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                rec = future.result()
+            except Exception as e:
+                print(f"  ⚠️ Cluster {idx:04d} raised an exception: {e}")
+                rec = None
 
-        csv_rows.append(
-            [
-                canonical_record["kb_id"],
-                canonical_record["category"],
-                canonical_record["subcategory"],
-                canonical_record["canonical_question"],
-                canonical_record["canonical_answer"],
-                canonical_record["last_updated"],
-                "|".join(canonical_record["source_rows"]),
-            ]
-        )
+            if rec:
+                canonical_records.append(rec)
 
-    # Write CSV for Excel review
-    with CANONICAL_CSV_PATH.open("w", encoding="utf-8", newline="") as f_csv:
-        writer = csv.writer(f_csv)
-        writer.writerow(
-            [
-                "kb_id",
-                "category",
-                "subcategory",
-                "canonical_question",
-                "canonical_answer",
-                "last_updated",
-                "source_rows",
-            ]
-        )
-        writer.writerows(csv_rows)
+            completed += 1
+            if completed % PROGRESS_EVERY == 0 or completed == total_clusters:
+                pct = completed * 100.0 / total_clusters
+                print(f"  Progress: {completed}/{total_clusters} clusters ({pct:.1f}%)")
 
-    # Write JSON array (valid JSON)
+    elapsed = time.time() - t0
+    print(
+        f"\nFinished processing. {len(canonical_records)} canonical records created "
+        f"in {elapsed:.1f}s "
+        f"(~{elapsed / max(1, len(canonical_records)):.2f}s/record)."
+    )
+
+    # Sort for stable output order
+    canonical_records.sort(key=lambda r: r["kb_id"])
+
+    # --- JSON output (for File Search) ---
     with CANONICAL_JSON_PATH.open("w", encoding="utf-8") as f_json:
         json.dump(canonical_records, f_json, ensure_ascii=False, indent=2)
 
-    print(f"\n✅ Canonical CSV written to:  {CANONICAL_CSV_PATH}")
-    print(f"✅ Canonical JSON written to: {CANONICAL_JSON_PATH}")
+    print(f"\n✅ Canonical JSON written to: {CANONICAL_JSON_PATH}")
+
+    # --- CSV output (for manual inspection) ---
+    if canonical_records:
+        df_can = pd.DataFrame(canonical_records)
+
+        # Flatten list fields for CSV readability
+        for col in ("source_rows", "deprecated_removed"):
+            if col in df_can.columns:
+                df_can[col] = df_can[col].apply(
+                    lambda v: ";".join(map(str, v)) if isinstance(v, list) else str(v)
+                )
+
+        # utf-8-sig so Excel opens it correctly (no â€™ garbage)
+        df_can.to_csv(CANONICAL_CSV_PATH, index=False, encoding="utf-8-sig")
+        print(f"✅ Canonical CSV written to:  {CANONICAL_CSV_PATH}")
 
 
 if __name__ == "__main__":
