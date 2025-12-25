@@ -121,3 +121,36 @@ Final CSV columns:
 
 ```text
 customer_question_out,kb_answer_1,kb_answer_2,kb_answer_3,kb_answer_final
+```
+
+---
+
+## Project Structure
+
+```text
+.
+├── data_kb/
+│   ├── raw/                # Raw historical RFP answers (CSV)
+│   └── canonical/          # Distilled, de-duplicated KB (JSON)
+├── input_rfp/              # Production RFP CSVs to be answered
+├── input_rfp_test/         # Test RFP CSVs
+├── output_rfp_gemini/      # Generated answers for production
+├── output_rfp_gemini_test/ # Generated answers for testing
+├── prompts_instructions/   # System prompts and instructions (Gemini logic)
+│   ├── rfp_system_prompt.txt
+│   └── kb_distiller_prompt.txt
+├── scripts/
+│   ├── core/               # Main logic: KB builder and Batch engine
+│   ├── maintenance/        # KB upload and key verification
+│   ├── custom/             # Custom processing scripts
+│   └── archive/            # Old versions or experimental scripts
+├── requirements.txt        # Python dependencies
+└── README.md               # This file
+```
+
+---
+
+## Usage
+1. **Setup:** `pip install -r requirements.txt` and create `.env` with `GEMINI_API_KEY`.
+2. **Build KB:** `python scripts/core/kb_build_canonical.py`
+3. **Run Batch:** `python scripts/core/rfp_batch_gemini_filesearch.py`
