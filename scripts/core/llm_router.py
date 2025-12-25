@@ -28,14 +28,30 @@ SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts_instructions/rfp_system_prompt_univ
 
 # --- MODEL REGISTRY ---
 MODELS = {
+    # Google
     "gemini": {"name": "gemini-3-pro-preview", "provider": "google"},
     "gemini-flash": {"name": "gemini-3-flash-preview", "provider": "google"},
+    # Anthropic
     "claude": {"name": "claude-sonnet-4-20250514", "provider": "anthropic"},
+    "claude-opus": {"name": "claude-opus-4-20250514", "provider": "anthropic"},
+    # OpenAI
     "gpt5": {"name": "gpt-5", "provider": "openai"},
-    "deepseek": {"name": "deepseek-chat", "provider": "deepseek"},
-    "kimi": {"name": "kimi-k2-0905", "provider": "moonshot"},
-    "llama": {"name": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "provider": "together"},
+    "o3": {"name": "o3", "provider": "openai"},
+    # xAI
     "grok": {"name": "grok-3-beta", "provider": "xai"},
+    # DeepSeek
+    "deepseek": {"name": "deepseek-chat", "provider": "deepseek"},
+    "deepseek-r1": {"name": "deepseek-reasoner", "provider": "deepseek"},
+    # Moonshot (Kimi)
+    "kimi": {"name": "kimi-k2-0905", "provider": "moonshot"},
+    # Meta (via Together)
+    "llama": {"name": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", "provider": "together"},
+    # Perplexity
+    "perplexity": {"name": "sonar-pro", "provider": "perplexity"},
+    # Mistral
+    "mistral": {"name": "mistral-large-latest", "provider": "mistral"},
+    # Alibaba (Qwen)
+    "qwen": {"name": "qwen3-235b-a22b", "provider": "alibaba"},
 }
 
 
@@ -219,6 +235,44 @@ class LLMRouter:
                     max_tokens=4096
                 )
                 return response.choices[0].message.content.strip()
+            # --- PERPLEXITY ---
+            elif provider == "perplexity":
+                client = OpenAI(
+                    api_key=os.environ.get("PERPLEXITY_API_KEY"),
+                    base_url="https://api.perplexity.ai"
+                )
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096
+                )
+                return clean_bold_markdown(response.choices[0].message.content.strip())
+
+            # --- MISTRAL ---
+            elif provider == "mistral":
+                client = OpenAI(
+                    api_key=os.environ.get("MISTRAL_API_KEY"),
+                    base_url="https://api.mistral.ai/v1"
+                )
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096
+                )
+                return clean_bold_markdown(response.choices[0].message.content.strip())
+
+            # --- ALIBABA (QWEN) ---
+            elif provider == "alibaba":
+                client = OpenAI(
+                    api_key=os.environ.get("DASHSCOPE_API_KEY"),
+                    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                )
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096
+                )
+                return clean_bold_markdown(response.choices[0].message.content.strip())
 
             else:
                 return f"Error: Unknown provider {provider}"
