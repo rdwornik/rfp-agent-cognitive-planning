@@ -37,6 +37,7 @@ input_rfp_test/
 output_rfp_gemini/
 output_rfp_gemini_test/
 output_rfp_gemini_test_flagged
+output_rfp_universal/
 tmp_rfps_to_be_answered/
 
 # --- KB data (raw + canonical) ---
@@ -45,6 +46,9 @@ tmp_rfps_to_be_answered/
 # and you want them versioned, comment these lines out.
 data_kb/raw/
 data_kb/canonical/
+
+# --- VECTOR DATABASE (Generated Artifact) ---
+data_kb/chroma_store/
 
 # Top-level KB working files & exports
 RFP_Database_Cognitive_Planning*.csv

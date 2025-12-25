@@ -31,8 +31,9 @@ def build_index():
     try:
         client.delete_collection(name=COLLECTION_NAME)
         print("🗑️  Cleared old collection.")
-    except ValueError:
-        pass 
+    except Exception as e:
+        # It's okay if it fails (it means the collection didn't exist yet)
+        print(f"ℹ️  No existing collection to clear (creating new one).")
 
     collection = client.create_collection(
         name=COLLECTION_NAME, 

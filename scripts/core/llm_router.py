@@ -19,7 +19,7 @@ DB_PATH = "data_kb/chroma_store"
 COLLECTION_NAME = "rfp_knowledge_base"
 
 # Models
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-pro"
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 class LLMRouter:

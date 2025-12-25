@@ -1,3 +1,15 @@
+"""
+rfp_batch_universal.py
+Universal RFP batch processor with multi-LLM support.
+
+Usage:
+  python rfp_batch_universal.py                     # Production mode, gemini
+  python rfp_batch_universal.py --test              # Test mode, gemini
+  python rfp_batch_universal.py --model claude      # Production mode, claude
+  python rfp_batch_universal.py --test --model gpt5 # Test mode, gpt5
+  python rfp_batch_universal.py -t -m deepseek      # Short flags
+"""
+import argparse
 import pandas as pd
 import os
 import time
@@ -5,50 +17,92 @@ import concurrent.futures
 from datetime import datetime
 from llm_router import LLMRouter
 
-# --- CONFIGURATION ---
-TEST_MODE = os.environ.get("RFP_TEST_MODE", "0") == "1"
-INPUT_DIR = "input_rfp_test/" if TEST_MODE else "input_rfp/"
-OUTPUT_DIR = "output_rfp_universal/"
-MAX_WORKERS = 4
-MODEL_TO_USE = "gemini"  # "gemini" or "claude"
+# --- ARGUMENT PARSER ---
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Universal RFP Batch Processor with multi-LLM support"
+    )
+    parser.add_argument(
+        "-t", "--test",
+        action="store_true",
+        help="Run in test mode (uses input_rfp_test/ folder)"
+    )
+    parser.add_argument(
+        "-m", "--model",
+        type=str,
+        default="gemini",
+        choices=["gemini", "gemini-flash", "claude", "gpt5", "deepseek", "kimi", "llama", "grok"],
+        help="LLM model to use (default: gemini)"
+    )
+    parser.add_argument(
+        "-w", "--workers",
+        type=int,
+        default=4,
+        help="Number of parallel workers (default: 4)"
+    )
+    return parser.parse_args()
+
 
 # --- HELPER: Find Column ---
 def detect_question_column(df):
     candidates = [
         'Question', 'Requirement', 'Description', 'Customer Question', 
-        'RFP Question', 'Functional Requirement', 'Question Text'
+        'RFP Question', 'Functional Requirement', 'Question Text', 
+        'customer_question'
     ]
-    # Exact + Case Insensitive
-    col_map = {c.lower(): c for c in df.columns}
+    
+    def normalize(s): 
+        return str(s).lower().replace("_", " ").strip()
+    
+    col_map = {normalize(c): c for c in df.columns}
+    
     for cand in candidates:
-        if cand.lower() in col_map:
-            return col_map[cand.lower()]
+        norm_cand = normalize(cand)
+        if norm_cand in col_map:
+            return col_map[norm_cand]
+            
     # Fallback: Length heuristic
     for col in df.columns:
         if df[col].dtype == object:
-            if df[col].astype(str).str.len().mean() > 20:
+            non_empty = df[col].dropna().astype(str)
+            if len(non_empty) > 0 and non_empty.str.len().mean() > 20:
                 return col
     return None
 
+
 # --- WORKER FUNCTION ---
-def process_single_row(router, row, question_col):
-    question = str(row[question_col])
-    if len(question.strip()) < 5:
-        return "N/A (Question too short)"
+def process_single_row(router, row, question_col, model):
+    val = row[question_col]
+    
+    if pd.isna(val) or str(val).strip() == "":
+        return ""
+    
+    question = str(val).strip()
+    
+    if len(question) < 3:
+        return ""
+    
     try:
-        # Direct generation (Option A: Simplicity first)
-        return router.generate_answer(question, model=MODEL_TO_USE)
+        return router.generate_answer(question, model=model)
     except Exception as e:
         return f"ERROR: {str(e)}"
 
+
 # --- FILE PROCESSOR ---
-def process_file(file_path, router):
-    print(f"\n📂 Reading: {file_path}")
+def process_file(file_path, router, model, max_workers):
+    print(f"\n{'='*50}")
+    print(f"📂 Reading: {file_path}")
+    print(f"🤖 Model: {model.upper()}")
+    print(f"{'='*50}")
+    
     try:
         if file_path.endswith(".xlsx"):
             df = pd.read_excel(file_path)
         elif file_path.endswith(".csv"):
-            df = pd.read_csv(file_path, encoding="utf-8")
+            try:
+                df = pd.read_csv(file_path, encoding="utf-8")
+            except UnicodeDecodeError:
+                df = pd.read_csv(file_path, encoding="latin-1")
         else:
             print("❌ Unsupported file format")
             return
@@ -58,53 +112,104 @@ def process_file(file_path, router):
 
     q_col = detect_question_column(df)
     if not q_col:
-        print(f"❌ Error: No question column found in {os.path.basename(file_path)}")
+        print(f"❌ Error: No question column found.")
+        print(f"   Columns available: {list(df.columns)}")
         return
-    print(f"✅ Detected Question Column: '{q_col}'")
 
-    print(f"🚀 Processing {len(df)} items ({MAX_WORKERS} threads) with {MODEL_TO_USE.upper()}...")
+    print(f"✅ Question Column: '{q_col}'")
+    print(f"📊 Total rows: {len(df)}")
+    print(f"⚡ Workers: {max_workers}")
+    print(f"\n🚀 Starting processing...")
+    
     start_time = time.time()
     
-    # Parallel Execution
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Use map to ensure results are returned in the same order as rows
-        results = list(executor.map(lambda r: process_single_row(router, r, q_col), [row for _, row in df.iterrows()]))
+    rows = [row for _, row in df.iterrows()]
+    completed = 0
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(process_single_row, router, row, q_col, model) 
+            for row in rows
+        ]
+        
+        for future in concurrent.futures.as_completed(futures):
+            completed += 1
+            if completed % 5 == 0 or completed == len(rows):
+                pct = completed * 100 / len(rows)
+                print(f"   Progress: {completed}/{len(rows)} ({pct:.1f}%)")
+        
+        results = [f.result() for f in futures]
 
-    df[f"Univ_Answer_{MODEL_TO_USE}"] = results
+    output_df = pd.DataFrame({
+        "customer_question": df[q_col].fillna(""),
+        "answer": results
+    })
+    
+    output_dir = "output_rfp_universal/"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    filename = os.path.basename(file_path)
-    out_path = os.path.join(OUTPUT_DIR, f"Univ_{MODEL_TO_USE}_{timestamp}_{filename}")
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    out_path = os.path.join(output_dir, f"{base_name}_{model}_{timestamp}.csv")
     
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
-        
-    if out_path.endswith(".csv"):
-        df.to_csv(out_path, index=False, encoding="utf-8")
-    else:
-        df.to_excel(out_path, index=False)
+    output_df.to_csv(out_path, index=False, encoding="utf-8-sig")
     
     elapsed = time.time() - start_time
-    print(f"✅ Saved to: {out_path}")
-    print(f"⏱️  Total: {elapsed:.2f}s (Avg: {elapsed/len(df):.2f}s/row)")
+    non_empty = len([r for r in results if r and not r.startswith("ERROR")])
+    
+    print(f"\n{'='*50}")
+    print(f"✅ COMPLETE!")
+    print(f"📄 Output: {out_path}")
+    print(f"📊 Processed: {non_empty}/{len(df)} questions")
+    print(f"⏱️  Time: {elapsed:.1f}s ({elapsed/max(1,len(df)):.2f}s/row)")
+    print(f"{'='*50}")
+
 
 # --- MAIN ---
-if __name__ == "__main__":
-    if not os.path.exists(INPUT_DIR):
-        os.makedirs(INPUT_DIR)
-        print(f"⚠️ Created input folder '{INPUT_DIR}'. Add files and run again.")
-    else:
-        files = [f for f in os.listdir(INPUT_DIR) if f.endswith((".xlsx", ".csv")) and not f.startswith("~$")]
+def main():
+    args = parse_args()
+    
+    input_dir = "input_rfp_test/" if args.test else "input_rfp/"
+    
+    print("\n" + "="*50)
+    print("🌐 UNIVERSAL RFP BATCH PROCESSOR")
+    print("="*50)
+    print(f"Mode:    {'TEST' if args.test else 'PRODUCTION'}")
+    print(f"Input:   {input_dir}")
+    print(f"Model:   {args.model}")
+    print(f"Workers: {args.workers}")
+    print("="*50)
+    
+    if not os.path.exists(input_dir):
+        os.makedirs(input_dir)
+        print(f"\n⚠️ Created '{input_dir}'. Add files and run again.")
+        return
+    
+    files = [
+        f for f in os.listdir(input_dir) 
+        if f.endswith((".xlsx", ".csv")) and not f.startswith("~$")
+    ]
+    
+    if not files:
+        print(f"\n⚠️ No .xlsx or .csv files found in {input_dir}")
+        return
+    
+    print(f"\n📁 Found {len(files)} file(s): {files}")
+    
+    try:
+        print("\n⚙️ Initializing Universal Router...")
+        router = LLMRouter()
+        print("✅ Router ready!\n")
         
-        if not files:
-            print(f"⚠️ No files found in {INPUT_DIR}")
-        else:
-            # Init Router ONCE (efficient)
-            print("⚙️  Initializing Universal Router...")
-            try:
-                main_router = LLMRouter()
-                for f in files:
-                    process_file(os.path.join(INPUT_DIR, f), main_router)
-            except Exception as e:
-                print(f"❌ CRITICAL ERROR: {e}")
+        for f in files:
+            process_file(os.path.join(input_dir, f), router, args.model, args.workers)
+            
+    except Exception as e:
+        print(f"\n❌ CRITICAL ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    main()
