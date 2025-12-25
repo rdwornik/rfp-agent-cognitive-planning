@@ -4,13 +4,13 @@ kb_build_canonical.py
 Builds a canonical, de-duplicated KB from the raw RFP answers.
 
 Pipeline (from repo root):
-  - Load data_kb/raw/RFP_Database_Cognitive_Planning.csv
+  - Load data_kb/raw/RFP_Database_AIML.csv
   - Group similar questions by category + normalized question text
   - For each cluster, call Gemini to distill ONE canonical answer
     (time-aware: newer End Date answers override older ones)
   - Write canonical KB to:
-      data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json
-      data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.csv
+      data_kb/canonical/RFP_Database_AIML_CANONICAL.json
+      data_kb/canonical/RFP_Database_AIML_CANONICAL.csv
 
 Notes:
 - The JSON file is the source of truth that will be uploaded into
@@ -37,12 +37,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]  # repo root
 RAW_KB_DIR = PROJECT_ROOT / "data_kb" / "raw"
 CANONICAL_KB_DIR = PROJECT_ROOT / "data_kb" / "canonical"
 
-RAW_CSV_PATH = RAW_KB_DIR / "RFP_Database_Cognitive_Planning.csv"
+RAW_CSV_PATH = RAW_KB_DIR / "RFP_Database_AIML.csv"
 
 CANONICAL_JSON_PATH = (
-    CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.json"
+    CANONICAL_KB_DIR / "RFP_Database_AIML_CANONICAL.json"
 )
-CANONICAL_CSV_PATH = CANONICAL_KB_DIR / "RFP_Database_Cognitive_Planning_CANONICAL.csv"
+CANONICAL_CSV_PATH = CANONICAL_KB_DIR / "RFP_Database_AIML_CANONICAL.csv"
 
 DISTILLER_PROMPT_PATH = (
     PROJECT_ROOT / "prompts_instructions" / "kb_distiller_prompt.txt"
@@ -297,9 +297,7 @@ def call_gemini_distiller(
 def process_single_cluster(args) -> dict | None:
     """
     Worker function executed in parallel for each cluster.
-
-    args = (i, rows, meta, distiller_prompt)
-    Returns a canonical_record dict or None if skipped/failed.
+    Now supports rich metadata (keywords, variants) and search_blob construction.
     """
     i, rows, meta, distiller_prompt = args
 
@@ -330,14 +328,41 @@ def process_single_cluster(args) -> dict | None:
     if MAX_CANONICAL_CHARS and MAX_CANONICAL_CHARS > 0:
         answer_text = answer_text[:MAX_CANONICAL_CHARS]
 
+    # --- NEW: Extract rich metadata ---
+    keywords = distilled.get("keywords", [])
+    variants = distilled.get("question_variants", [])
+    
+    # Ensure they are lists (fallback if LLM hallucinates format)
+    if isinstance(keywords, str): keywords = [k.strip() for k in keywords.split(",")]
+    if isinstance(variants, str): variants = [v.strip() for v in variants.split("|")]
+
+    category = newest.get(meta["col_category"], "") if meta["col_category"] else ""
+    subcategory = newest.get(meta["col_subcat"], "") if meta["col_subcat"] else ""
+    canonical_q = distilled.get("canonical_question", "").strip()
+
+    # --- NEW: Construct Search Blob (Dense Context) ---
+    # Format: "CAT: ... | KEYWORDS: ... | VARIANTS: ... | Q: ... | A: ..."
+    search_blob_parts = [
+        f"CAT: {category} / {subcategory}",
+        f"KEYWORDS: {', '.join(keywords)}",
+        f"VARIANTS: {' | '.join(variants)}",
+        f"Q: {canonical_q}",
+        f"A: {answer_text}"
+    ]
+    search_blob = " || ".join(search_blob_parts)
+
     canonical_record = {
         "kb_id": f"kb_{i:04d}",
-        "category": newest.get(meta["col_category"], "")
-        if meta["col_category"]
-        else "",
-        "subcategory": newest.get(meta["col_subcat"], "") if meta["col_subcat"] else "",
-        "canonical_question": distilled.get("canonical_question", "").strip(),
+        "category": category,
+        "subcategory": subcategory,
+        "canonical_question": canonical_q,
         "canonical_answer": answer_text,
+        "rich_metadata": {
+            "keywords": keywords,
+            "question_variants": variants,
+            "source_rows_count": len(rows)
+        },
+        "search_blob": search_blob,  # <--- The magic field for File Search
         "last_updated": distilled.get(
             "last_updated", str(newest.get(meta["col_end_date"], ""))
         ),
