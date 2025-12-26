@@ -110,7 +110,7 @@ class LLMRouter:
         # Connect to ChromaDB
         self.client_db = chromadb.PersistentClient(path=str(DB_PATH))
         self.ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
+            model_name="BAAI/bge-large-en-v1.5"
         )
         self.collection = self.client_db.get_collection(
             name=COLLECTION_NAME,

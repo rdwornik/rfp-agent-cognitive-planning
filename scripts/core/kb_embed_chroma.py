@@ -22,9 +22,9 @@ def build_index():
     # Initialize ChromaDB (Persistent)
     client = chromadb.PersistentClient(path=DB_PATH)
     
-    print("⚙️  Loading local embedding model (all-MiniLM-L6-v2)...")
+    print("⚙️  Loading local embedding model (BAAI/bge-large-en-v1.5)...")
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
+        model_name="BAAI/bge-large-en-v1.5"
     )
 
     # Clean start
