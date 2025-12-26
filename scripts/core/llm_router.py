@@ -52,8 +52,9 @@ MODELS = {
     "mistral": {"name": "mistral-large-latest", "provider": "mistral"},
     # Alibaba (Qwen)
     "qwen": {"name": "qwen3-235b-a22b", "provider": "alibaba"},
+    # Zhipu (GLM)
+    "glm": {"name": "glm-4.7", "provider": "zhipu"},    
 }
-
 
 def load_system_prompt() -> str:
     """Load system prompt from external file."""
@@ -72,6 +73,25 @@ def clean_bold_markdown(text: str) -> str:
     # Remove headers
     text = re.sub(r'^#+\s+', '', text, flags=re.MULTILINE)
     return text.strip()
+
+import time
+import random
+
+def retry_with_backoff(func, max_retries=5, base_delay=2):
+    """Retry a function with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            error_str = str(e)
+            # Check for rate limit errors (429, 1302, concurrency)
+            if "429" in error_str or "1302" in error_str or "concurrency" in error_str.lower():
+                delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                print(f"   ⚠️ Rate limited. Retry {attempt + 1}/{max_retries} in {delay:.1f}s...")
+                time.sleep(delay)
+            else:
+                raise  # Re-raise non-rate-limit errors
+    raise Exception(f"Max retries ({max_retries}) exceeded")
 
 class LLMRouter:
     def __init__(self):
@@ -273,6 +293,23 @@ class LLMRouter:
                     max_tokens=4096
                 )
                 return clean_bold_markdown(response.choices[0].message.content.strip())
+
+            # --- ZHIPU (GLM) ---
+            elif provider == "zhipu":
+                def call_glm():
+                    client = OpenAI(
+                        api_key=os.environ.get("ZHIPU_API_KEY"),
+                        base_url="https://api.z.ai/api/paas/v4/"
+                    )
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=8192
+                    )
+                    return response.choices[0].message.content.strip()
+                
+                result = retry_with_backoff(call_glm, max_retries=5, base_delay=2)
+                return clean_bold_markdown(result)
 
             else:
                 return f"Error: Unknown provider {provider}"

@@ -28,10 +28,10 @@ def parse_args():
         help="Run in test mode (uses input_rfp_test/ folder)"
     )
     parser.add_argument(
-        "-m", "--model",
-        type=str,
-        default="gemini",
-        choices=["gemini", "gemini-flash", "claude", "gpt5", "deepseek", "kimi", "llama", "grok"],
+    "-m", "--model",
+    type=str,
+    default="gemini",
+    choices=["gemini", "gemini-flash", "claude", "gpt5", "deepseek", "kimi", "llama", "grok", "glm"],
         help="LLM model to use (default: gemini)"
     )
     parser.add_argument(
