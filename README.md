@@ -1,156 +1,270 @@
-# RFP Answer Engine – Cognitive Planning (v0.1)
+# RFP Answer Engine – Cognitive Planning (v0.2)
 
-This repo hosts an experimental **RFP answer engine** for Blue Yonder’s planning platform, focused on **Cognitive / SCP** RFPs.
+This repo hosts an **RFP answer engine** for Blue Yonder's planning platform, focused on **Cognitive / SCP** RFPs.
 
 The idea:  
-Take historical presales answers → build a **canonical KB** → let Gemini + File Search draft answers for new RFPs in **CSV/Excel** form, in a way that is:
+Take historical presales answers → build a **canonical KB** → let LLMs draft answers for new RFPs in **CSV/Excel** form, in a way that is:
 
 - **KB-first**: no hallucinated product facts.
+- **Multi-LLM**: supports Gemini, Claude, GPT-5, DeepSeek, GLM, and more.
 - **Batch-oriented**: works well with Excel exports.
+- **Privacy-aware**: anonymization layer protects customer names.
 - **Auditable**: easy to review, tweak, and re-run.
 
-We’re not “done”; this is a solid v0.1 with a clear, known limitation: **Gemini still struggles to consistently pull the full 1–2k-character canonical answers into the final RFP answers**. That’s the main open problem for the next iteration.
+---
+
+## What's New in v0.2
+
+| Feature | Description |
+|---------|-------------|
+| **Universal RAG** | Local ChromaDB with BGE embeddings (no vendor lock-in) |
+| **Multi-LLM Router** | Switch between 9+ LLM providers with one flag |
+| **Anonymization** | Protect customer names before API calls |
+| **BGE Embeddings** | Upgraded from MiniLM to `bge-large-en-v1.5` for better retrieval |
 
 ---
 
-## High-level architecture
-
-### 1. Canonical KB builder
-
-**Script:** `scripts/core/kb_build_canonical.py`  
-**Source:** `data_kb/raw/RFP_Database_Cognitive_Planning.csv`  
-**Output:** `data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json`
-
-Pipeline:
-
-1. Load raw historical RFP answers (Cognitive / SCP scope).
-2. Normalize and cluster **similar questions** by:
-   - Solution / category / subcategory
-   - Normalized question text
-3. For each cluster:
-   - Ask Gemini to **distill a single canonical_answer**, respecting:
-     - Newer “End Date” answers override older ones.
-     - Tech Presales answers are preferred where available.
-4. Write a canonical, de-duplicated KB JSON file.
-
-This JSON is then loaded into a **Google Gemini File Search store**, which becomes the **only source of product truth** for the batch answering scripts.
+## High-level Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     RFP Questions (CSV/Excel)               │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ANONYMIZATION LAYER (optional)                             │
+│  - Remove customer names from blocklist                     │
+│  - Replace with [CUSTOMER] placeholder                      │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  RETRIEVAL (ChromaDB + BGE-large)                           │
+│  - Local vector database                                    │
+│  - Top-k similar KB entries                                 │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  LLM ROUTER                                                 │
+│  - Gemini, Claude, GPT-5, DeepSeek, GLM, Kimi, Llama, Grok  │
+│  - KB-first system prompt                                   │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  DE-ANONYMIZATION                                           │
+│  - Restore customer names in output                         │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Answered RFP (CSV)                      │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-### 2. Batch RFP answer engine (CSV in → CSV out)
+## Quick Start
 
-**Script:** `scripts/core/rfp_batch_gemini_filesearch.py`  
-**Inputs:**
+### 1. Setup
+```bash
+pip install -r requirements.txt
+```
 
-- CSVs exported from Excel:
-  - `input_rfp/`         (prod)
-  - `input_rfp_test/`    (test)
-- Environment:
-  - `GEMINI_API_KEY` set
-  - File Search store name:  
-    `fileSearchStores/rfpcognitiveplanningkbv2-6pqup4g1x9sm`
-- System prompt: `prompts_instructions/rfp_system_prompt.txt`
+Create `.env` file:
+```bash
+GEMINI_API_KEY=your_key
+ANTHROPIC_API_KEY=your_key      # Optional: for Claude
+OPENAI_API_KEY=your_key         # Optional: for GPT-5
+DEEPSEEK_API_KEY=your_key       # Optional: for DeepSeek
+ZHIPU_API_KEY=your_key          # Optional: for GLM
+```
 
-**Outputs:**
+### 2. Build KB
+```bash
+# Build canonical KB from raw data
+python scripts/core/kb_build_canonical.py
 
-- `output_rfp_gemini/`  
-- `output_rfp_gemini_test/`  
-Each file:  
-`<input_name>_answers_gemini.csv`
+# Index to ChromaDB (local, free)
+python scripts/core/kb_embed_chroma.py
+```
 
-#### What the engine does per row
+### 3. Run Batch Processor
+```bash
+# Test mode with Gemini
+python scripts/core/rfp_batch_universal.py --test --model gemini
 
-1. **Extract the question** from the RFP row using header heuristics:
+# Production with Claude + anonymization
+python scripts/core/rfp_batch_universal.py --model claude --anonymize
 
-   Priority:
-   1. First non-empty column whose header contains `customer_question`
-   2. Else first non-empty column whose header contains **both** `functionality` and `requirement`
-   3. Else first non-empty column whose header contains `description`
+# Short flags
+python scripts/core/rfp_batch_universal.py -t -m deepseek -a -w 8
+```
 
-   If no such column has text → we treat it as a **blank question row** and emit an empty output row (to keep the CSV aligned with Excel).
+---
 
-2. **Strict KB-first call (Gemini + File Search)**
+## Supported LLM Models
 
-   - Use the system prompt (`rfp_system_prompt.txt`) which enforces:
-     - Canonical KB as **only** source of product facts.
-     - Copy-first behaviour from `canonical_answer`.
-     - SaaS-first, no new SLAs, no made-up certifications.
-   - Model returns **one single-line kb_answer** (no headers, no CSV).
+| Model | Provider | Flag | Cost (per 1M tokens) |
+|-------|----------|------|----------------------|
+| Gemini 2.5 Pro | Google | `gemini` | $2 in / $12 out |
+| Gemini 2.5 Flash | Google | `gemini-flash` | $0.15 in / $0.60 out |
+| Claude Sonnet 4 | Anthropic | `claude` | $3 in / $15 out |
+| GPT-5 | OpenAI | `gpt5` | $1.25 in / $10 out |
+| DeepSeek V3 | DeepSeek | `deepseek` | $0.28 in / $0.42 out |
+| GLM 4.7 | Zhipu | `glm` | $0.60 in / $2.20 out |
+| Kimi K2 | Moonshot | `kimi` | $0.60 in / $2.05 out |
+| Llama 4 Maverick | Together | `llama` | $0.27 in / $0.80 out |
+| Grok 3 | xAI | `grok` | $3 in / $15 out |
 
-3. **Relaxed fallback when needed**
+---
 
-   - If the strict pass fails technically or responds with `Not in KB`, we:
-     - Retry in **RELAXED FALLBACK MODE**:
-       - Model may use generic SaaS / planning domain knowledge.
-       - Must prefix answer with `[MODEL-GUESS] `.
-       - Must stay high-level and conservative (no new numbers / SLAs).
-   - If relaxed also fails:
-     - We return a safe error text like `[Error v1] …`.
+## Anonymization System
 
-4. **Multi-variant answers per row**
+Protect customer names before sending to external LLM APIs.
 
-   For each question we generate **three independent variants**:
+### Configure Blocklist
 
-   - `kb_answer_1`
-   - `kb_answer_2`
-   - `kb_answer_3`
+Edit `config/anonymization.yaml`:
+```yaml
+blocklist:
+  kb_sources:
+    - Acme Corp           # Customers whose data built the KB
+  customers:
+    - Walmart             # Other names to protect
+    - Target
+  projects:
+    - Project Phoenix     # Internal project names
+  internal: []
 
-   Each variant runs the strict-then-relaxed logic independently, so you get slightly different wording and emphasis. This is intentional: the human reviewer can pick their preferred version or use them as material to refine.
+session:
+  customer_name: "Carrefour"   # Current RFP customer
+  placeholder: "[CUSTOMER]"
 
-5. **Fusion step: aggregate the 3 variants into `kb_answer_final`**
+settings:
+  anonymize_api_calls: true
+  anonymize_local_calls: false
+```
 
-   We run a **separate Gemini call** to fuse the three variants into a single answer:
+### CLI Commands
+```bash
+# Scan KB for sensitive terms
+python -m scripts.core.anonymization.scan_kb
 
-   - Goal is to create a **UNION of details**, not a minimal summary.
-   - Rules:
-     - Include **all non-contradictory technical details** that appear in *any* variant:  
-       PDC, BYDM, Workflow Orchestrator, Data Functions, Snowflake Secure Data Share, SFTP/AS2, Teams/SharePoint integration, etc.
-     - Only deduplicate exact / obvious rephrasings.
-     - Resolve contradictions by keeping the safest high-level statement and dropping conflicting specifics.
-     - Treat `[MODEL-GUESS]` content as **lower trust**; only include it if generic and clearly safe.
-     - Strip `[MODEL-GUESS]` from the final answer.
-   - Output: `kb_answer_final` – one CSV-safe, single-line RFP answer.
+# Preview cleaning (dry run)
+python -m scripts.core.anonymization.clean_kb --dry-run
 
-6. **Parallel execution**
+# Clean KB
+python -m scripts.core.anonymization.clean_kb
 
-   - Rows are processed in parallel using a `ThreadPoolExecutor`.
-   - Each worker thread has its own Gemini client (thread-local) to avoid issues with shared state.
-   - `RFP_MAX_WORKERS` env var controls parallelism (default `4`).
+# Run with anonymization
+python scripts/core/rfp_batch_universal.py -t -m gemini -a
+```
 
-Final CSV columns:
-
-```text
-customer_question_out,kb_answer_1,kb_answer_2,kb_answer_3,kb_answer_final
+### How It Works
+```
+Input:  "Does Walmart need SSO integration?"
+    ↓ anonymize()
+API:    "Does [CUSTOMER] need SSO integration?"
+    ↓ LLM response
+Output: "Blue Yonder supports SSO for [CUSTOMER]..."
+    ↓ deanonymize()
+Final:  "Blue Yonder supports SSO for Walmart..."
 ```
 
 ---
 
 ## Project Structure
-
-```text
+```
 .
+├── config/
+│   └── anonymization.yaml      # Blocklist and session config
 ├── data_kb/
-│   ├── raw/                # Raw historical RFP answers (CSV)
-│   └── canonical/          # Distilled, de-duplicated KB (JSON)
-├── input_rfp/              # Production RFP CSVs to be answered
-├── input_rfp_test/         # Test RFP CSVs
-├── output_rfp_gemini/      # Generated answers for production
-├── output_rfp_gemini_test/ # Generated answers for testing
-├── prompts_instructions/   # System prompts and instructions (Gemini logic)
-│   ├── rfp_system_prompt.txt
-│   └── kb_distiller_prompt.txt
+│   ├── raw/                    # Raw historical RFP answers (CSV)
+│   ├── canonical/              # Distilled KB (JSON)
+│   └── chroma_store/           # Local vector database
+├── input_rfp/                  # Production RFP files
+├── input_rfp_test/             # Test RFP files
+├── output_rfp_universal/       # Generated answers
+├── logs/                       # Anonymization logs
+├── prompts_instructions/
+│   ├── rfp_system_prompt.txt           # Legacy (File Search)
+│   └── rfp_system_prompt_universal.txt # Universal RAG prompt
 ├── scripts/
-│   ├── core/               # Main logic: KB builder and Batch engine
-│   ├── maintenance/        # KB upload and key verification
-│   ├── custom/             # Custom processing scripts
-│   └── archive/            # Old versions or experimental scripts
-├── requirements.txt        # Python dependencies
-└── README.md               # This file
+│   └── core/
+│       ├── kb_build_canonical.py       # Build canonical KB
+│       ├── kb_embed_chroma.py          # Index to ChromaDB
+│       ├── llm_router.py               # Multi-LLM router
+│       ├── rfp_batch_universal.py      # Universal batch processor
+│       ├── rfp_batch_gemini_filesearch.py  # Legacy (File Search)
+│       └── anonymization/              # Anonymization package
+│           ├── config.py
+│           ├── core.py
+│           ├── middleware.py
+│           ├── scan_kb.py
+│           └── clean_kb.py
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## Usage
-1. **Setup:** `pip install -r requirements.txt` and create `.env` with `GEMINI_API_KEY`.
-2. **Build KB:** `python scripts/core/kb_build_canonical.py`
-3. **Run Batch:** `python scripts/core/rfp_batch_gemini_filesearch.py`
+## CLI Reference
+
+### Batch Processor
+```bash
+python scripts/core/rfp_batch_universal.py [OPTIONS]
+
+Options:
+  -t, --test          Use input_rfp_test/ folder
+  -m, --model MODEL   LLM to use (default: gemini)
+  -w, --workers N     Parallel workers (default: 4)
+  -a, --anonymize     Enable anonymization
+```
+
+### KB Management
+```bash
+# Build canonical KB
+python scripts/core/kb_build_canonical.py
+
+# Re-index ChromaDB
+python scripts/core/kb_embed_chroma.py
+```
+
+### Anonymization
+```bash
+# Scan KB
+python -m scripts.core.anonymization.scan_kb
+
+# Clean KB
+python -m scripts.core.anonymization.clean_kb [--dry-run]
+```
+
+---
+
+## Legacy: Google File Search
+
+The original File Search approach is still available:
+```bash
+python scripts/core/rfp_batch_gemini_filesearch.py
+```
+
+This uses Google's hosted File Search with the store:  
+`fileSearchStores/rfpcognitiveplanningkbv2-6pqup4g1x9sm`
+
+---
+
+## Roadmap
+
+- [ ] Add `--solution` flag for WMS/CatMan RFPs
+- [ ] Hybrid mode: Google File Search + local RAG
+- [ ] Local LLM support (Ollama + Mistral)
+- [ ] A/B testing across models
+- [ ] Cost tracking per batch
+
+---
+
+## License
+
+Internal use only – Blue Yonder Presales.
