@@ -1,0 +1,46 @@
+# ============================================
+# ANONYMIZATION CONFIGURATION
+# ============================================
+
+# ---------------------------------------------
+# BLOCKLIST: Names to NEVER send to external APIs
+# ---------------------------------------------
+blocklist:
+  # Customers whose data is IN the canonical KB
+  # (These names might appear in historical answers)
+  kb_sources:
+    - Acme Corp           # Example: RFP answers came from this customer
+    - GlobalRetail Inc    # Example: Another source customer
+    # Add your actual KB source customers here
+    
+  # Other customer names to protect
+  customers:
+    - Rolls Royce
+    - Biomerieux
+    - Coca Cola
+    - Pure Health
+    - Asos
+    - Walmart
+    
+  projects:
+    - Project Phoenix
+    
+  internal:
+    # Internal contact names
+
+# ---------------------------------------------
+# CURRENT SESSION
+# The customer we're currently answering RFP FOR
+# ---------------------------------------------
+session:
+  customer_name: "Merz"           # e.g., "Carrefour" when working on their RFP
+  placeholder: "[CUSTOMER]"
+
+# ---------------------------------------------
+# SETTINGS
+# ---------------------------------------------
+settings:
+  anonymize_api_calls: true
+  anonymize_local_calls: false
+  log_enabled: true
+  log_path: "logs/anonymization.log"

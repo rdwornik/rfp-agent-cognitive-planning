@@ -8,6 +8,7 @@ Usage:
   python rfp_batch_universal.py --model claude      # Production mode, claude
   python rfp_batch_universal.py --test --model gpt5 # Test mode, gpt5
   python rfp_batch_universal.py -t -m deepseek      # Short flags
+  python rfp_batch_universal.py -t -m gemini -a     # With anonymization
 """
 import argparse
 import pandas as pd
@@ -16,6 +17,8 @@ import time
 import concurrent.futures
 from datetime import datetime
 from llm_router import LLMRouter
+from anonymization import AnonymizationMiddleware  # NEW
+
 
 # --- ARGUMENT PARSER ---
 def parse_args():
@@ -28,10 +31,10 @@ def parse_args():
         help="Run in test mode (uses input_rfp_test/ folder)"
     )
     parser.add_argument(
-    "-m", "--model",
-    type=str,
-    default="gemini",
-    choices=["gemini", "gemini-flash", "claude", "gpt5", "deepseek", "kimi", "llama", "grok", "glm"],
+        "-m", "--model",
+        type=str,
+        default="gemini",
+        choices=["gemini", "gemini-flash", "claude", "gpt5", "deepseek", "kimi", "llama", "grok", "glm"],
         help="LLM model to use (default: gemini)"
     )
     parser.add_argument(
@@ -39,6 +42,11 @@ def parse_args():
         type=int,
         default=4,
         help="Number of parallel workers (default: 4)"
+    )
+    parser.add_argument(
+        "-a", "--anonymize",
+        action="store_true",
+        help="Anonymize customer names before sending to LLM API"
     )
     return parser.parse_args()
 
@@ -71,7 +79,7 @@ def detect_question_column(df):
 
 
 # --- WORKER FUNCTION ---
-def process_single_row(router, row, question_col, model):
+def process_single_row(router, row, question_col, model, middleware):
     val = row[question_col]
     
     if pd.isna(val) or str(val).strip() == "":
@@ -83,16 +91,26 @@ def process_single_row(router, row, question_col, model):
         return ""
     
     try:
-        return router.generate_answer(question, model=model)
+        # Anonymize before LLM call
+        clean_question, ctx = middleware.before(question)
+        
+        # Call LLM
+        answer = router.generate_answer(clean_question, model=model)
+        
+        # De-anonymize response
+        final_answer = middleware.after(answer, ctx)
+        
+        return final_answer
     except Exception as e:
         return f"ERROR: {str(e)}"
 
 
 # --- FILE PROCESSOR ---
-def process_file(file_path, router, model, max_workers):
+def process_file(file_path, router, model, max_workers, middleware):
     print(f"\n{'='*50}")
     print(f"📂 Reading: {file_path}")
     print(f"🤖 Model: {model.upper()}")
+    print(f"🔒 Anonymization: {'ON' if middleware.enabled else 'OFF'}")
     print(f"{'='*50}")
     
     try:
@@ -128,7 +146,7 @@ def process_file(file_path, router, model, max_workers):
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(process_single_row, router, row, q_col, model) 
+            executor.submit(process_single_row, router, row, q_col, model, middleware) 
             for row in rows
         ]
         
@@ -151,7 +169,8 @@ def process_file(file_path, router, model, max_workers):
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     base_name = os.path.splitext(os.path.basename(file_path))[0]
-    out_path = os.path.join(output_dir, f"{base_name}_{model}_{timestamp}.csv")
+    anon_suffix = "_anon" if middleware.enabled else ""
+    out_path = os.path.join(output_dir, f"{base_name}_{model}{anon_suffix}_{timestamp}.csv")
     
     output_df.to_csv(out_path, index=False, encoding="utf-8-sig")
     
@@ -172,13 +191,17 @@ def main():
     
     input_dir = "input_rfp_test/" if args.test else "input_rfp/"
     
+    # Initialize middleware
+    middleware = AnonymizationMiddleware(enabled=args.anonymize)
+    
     print("\n" + "="*50)
     print("🌐 UNIVERSAL RFP BATCH PROCESSOR")
     print("="*50)
-    print(f"Mode:    {'TEST' if args.test else 'PRODUCTION'}")
-    print(f"Input:   {input_dir}")
-    print(f"Model:   {args.model}")
-    print(f"Workers: {args.workers}")
+    print(f"Mode:        {'TEST' if args.test else 'PRODUCTION'}")
+    print(f"Input:       {input_dir}")
+    print(f"Model:       {args.model}")
+    print(f"Workers:     {args.workers}")
+    print(f"Anonymize:   {'YES 🔒' if args.anonymize else 'NO'}")
     print("="*50)
     
     if not os.path.exists(input_dir):
@@ -203,7 +226,7 @@ def main():
         print("✅ Router ready!\n")
         
         for f in files:
-            process_file(os.path.join(input_dir, f), router, args.model, args.workers)
+            process_file(os.path.join(input_dir, f), router, args.model, args.workers, middleware)
             
     except Exception as e:
         print(f"\n❌ CRITICAL ERROR: {e}")
