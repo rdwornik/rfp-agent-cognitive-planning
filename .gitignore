@@ -20,6 +20,7 @@ ENV/
 .vscode/
 .idea/
 *.code-workspace
+.claude/
 
 # --- OS cruft ---
 .DS_Store
@@ -62,6 +63,11 @@ RFP_Database_Cognitive_Planning*.xlsx
 # --- Local helper lists (not needed in Git) ---
 project_files.txt
 project_tree.txt
+
+# --- Test/debug scripts (temporary) ---
+test_*.py
+debug_*.py
+*_test.py
 
 # --- Ignore .github workflows in local dev ---
 .github/
