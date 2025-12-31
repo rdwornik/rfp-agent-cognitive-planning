@@ -9,15 +9,31 @@ Usage:
   python rfp_batch_universal.py --test --model gpt5 # Test mode, gpt5
   python rfp_batch_universal.py -t -m deepseek      # Short flags
   python rfp_batch_universal.py -t -m gemini -a     # With anonymization
+  python rfp_batch_universal.py --solution wms      # Solution-aware context
 """
 import argparse
 import pandas as pd
 import os
+import json
 import time
 import concurrent.futures
 from datetime import datetime
+from pathlib import Path
 from llm_router import LLMRouter
 from anonymization import AnonymizationMiddleware  # NEW
+
+# --- PROJECT ROOT AND PLATFORM MATRIX ---
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PLATFORM_MATRIX_PATH = PROJECT_ROOT / "config/platform_matrix.json"
+
+
+def get_available_solutions():
+    """Load available solutions from platform_matrix.json."""
+    if not PLATFORM_MATRIX_PATH.exists():
+        return []
+    with open(PLATFORM_MATRIX_PATH, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return list(data.get("solutions", {}).keys())
 
 
 # --- ARGUMENT PARSER ---
@@ -47,6 +63,16 @@ def parse_args():
         "-a", "--anonymize",
         action="store_true",
         help="Anonymize customer names before sending to LLM API"
+    )
+    # Get available solutions dynamically from platform_matrix.json
+    available_solutions = get_available_solutions()
+    parser.add_argument(
+        "-s", "--solution",
+        type=str,
+        default=None,
+        choices=available_solutions if available_solutions else None,
+        metavar="SOLUTION",
+        help=f"Solution-aware context injection. Available: {', '.join(available_solutions[:5])}... (see platform_matrix.json)"
     )
     return parser.parse_args()
 
@@ -195,13 +221,14 @@ def main():
     middleware = AnonymizationMiddleware(enabled=args.anonymize)
     
     print("\n" + "="*50)
-    print("🌐 UNIVERSAL RFP BATCH PROCESSOR")
+    print("UNIVERSAL RFP BATCH PROCESSOR")
     print("="*50)
     print(f"Mode:        {'TEST' if args.test else 'PRODUCTION'}")
     print(f"Input:       {input_dir}")
     print(f"Model:       {args.model}")
     print(f"Workers:     {args.workers}")
-    print(f"Anonymize:   {'YES 🔒' if args.anonymize else 'NO'}")
+    print(f"Anonymize:   {'YES' if args.anonymize else 'NO'}")
+    print(f"Solution:    {args.solution.upper() if args.solution else 'NONE (generic)'}")
     print("="*50)
     
     if not os.path.exists(input_dir):
@@ -221,9 +248,9 @@ def main():
     print(f"\n📁 Found {len(files)} file(s): {files}")
     
     try:
-        print("\n⚙️ Initializing Universal Router...")
-        router = LLMRouter()
-        print("✅ Router ready!\n")
+        print("\n[INFO] Initializing Universal Router...")
+        router = LLMRouter(solution=args.solution)
+        print("[SUCCESS] Router ready!\n")
         
         for f in files:
             process_file(os.path.join(input_dir, f), router, args.model, args.workers, middleware)

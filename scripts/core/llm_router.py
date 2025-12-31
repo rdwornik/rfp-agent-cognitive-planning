@@ -25,6 +25,8 @@ KB_JSON_PATH = PROJECT_ROOT / "data_kb/canonical/RFP_Database_UNIFIED_CANONICAL.
 DB_PATH = PROJECT_ROOT / "data_kb/chroma_store"
 COLLECTION_NAME = "rfp_knowledge_base"
 SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts_instructions/rfp_system_prompt_universal.txt"
+PLATFORM_MATRIX_PATH = PROJECT_ROOT / "config/platform_matrix.json"
+PLATFORM_CONTEXT_PATH = PROJECT_ROOT / "docs/platform_context.md"
 DEBUG = os.environ.get("DEBUG_RAG", "0") == "1"  # Set DEBUG_RAG=1 to enable debug logging
 
 # --- MODEL REGISTRY ---
@@ -64,6 +66,102 @@ def load_system_prompt() -> str:
     with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
         return f.read()
 
+
+def load_platform_matrix() -> dict:
+    """Load platform matrix configuration."""
+    if not PLATFORM_MATRIX_PATH.exists():
+        return {}
+    with open(PLATFORM_MATRIX_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_platform_context() -> str:
+    """Load platform context documentation."""
+    if not PLATFORM_CONTEXT_PATH.exists():
+        return ""
+    with open(PLATFORM_CONTEXT_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def build_solution_context(solution_code: str, platform_matrix: dict, platform_context: str) -> str:
+    """
+    Build solution-specific context string for injection into system prompt.
+
+    Args:
+        solution_code: e.g. 'wms', 'wms_native', 'planning'
+        platform_matrix: Loaded platform_matrix.json
+        platform_context: Loaded platform_context.md content
+
+    Returns:
+        Formatted context string for injection
+    """
+    solutions = platform_matrix.get("solutions", {})
+
+    if solution_code not in solutions:
+        return ""
+
+    solution = solutions[solution_code]
+    display_name = solution.get("display_name", solution_code)
+    family_name = solution.get("family_name", "")
+    services = solution.get("services", {})
+
+    # Categorize services by status
+    native_services = []
+    coming_services = []
+    infrastructure_services = []
+
+    for service_name, service_info in services.items():
+        status = service_info.get("status", "infrastructure")
+        if status == "native":
+            native_services.append(service_name)
+        elif status == "coming":
+            coming_services.append(service_name)
+        else:  # infrastructure or blank
+            infrastructure_services.append(service_name)
+
+    # Build the context block
+    lines = [
+        "=== SOLUTION-SPECIFIC CONTEXT ===",
+        f"You are answering for: {display_name}",
+        f"Product Family: {family_name}",
+        "",
+        "Platform Services Status:",
+    ]
+
+    if native_services:
+        lines.append(f"- Native Integration: {', '.join(sorted(native_services))}")
+    if coming_services:
+        lines.append(f"- Planned Integration: {', '.join(sorted(coming_services))}")
+    if infrastructure_services:
+        lines.append(f"- Infrastructure Level: {', '.join(sorted(infrastructure_services))}")
+
+    lines.append("")
+    lines.append("RESPONSE TEMPLATES BY INTEGRATION LEVEL:")
+    lines.append("")
+    lines.append("When a question relates to a NATIVE service:")
+    lines.append(f'  Template: "[Capability] for {display_name} is configured through Blue Yonder Platform."')
+    lines.append(f"  Key: Mention the product name ({display_name}) alongside the platform.")
+    lines.append("")
+    lines.append("When a question relates to a COMING/PLANNED service:")
+    lines.append('  Template: "Blue Yonder Platform supports this functionality on an infrastructure level and full native integration is planned."')
+    lines.append("  Key: Do NOT mention the specific product. Do NOT mention versions or dates.")
+    lines.append("")
+    lines.append("When a question relates to an INFRASTRUCTURE service:")
+    lines.append('  Template: "Blue Yonder Platform supports this functionality on an infrastructure level."')
+    lines.append("  Key: Do NOT mention the specific product. Do NOT mention any plans.")
+    lines.append("")
+    lines.append("CRITICAL RULES:")
+    lines.append("1. NEVER say 'not available', 'doesn't support', 'cannot', 'is not possible'")
+    lines.append("2. ALWAYS respond positively - the capability EXISTS on the platform")
+    lines.append("3. NEVER mention specific versions, release dates, or roadmap timelines")
+    lines.append("4. When status is native: mention the product name")
+    lines.append("5. When status is coming/infrastructure: do NOT mention the product name")
+    lines.append("")
+    lines.append("=== END SOLUTION CONTEXT ===")
+    lines.append("")
+
+    return "\n".join(lines)
+
 def clean_bold_markdown(text: str) -> str:
     """Remove bold/italic markdown but keep list structure."""
     import re
@@ -95,12 +193,28 @@ def retry_with_backoff(func, max_retries=5, base_delay=2):
     raise Exception(f"Max retries ({max_retries}) exceeded")
 
 class LLMRouter:
-    def __init__(self):
+    def __init__(self, solution: str = None):
         print("[INFO] Initializing Universal LLM Router...")
+
+        # Store solution parameter
+        self.solution = solution
 
         # Load system prompt
         self.system_prompt_template = load_system_prompt()
         print(f"[SUCCESS] Loaded prompt from: {SYSTEM_PROMPT_PATH.name}")
+
+        # Load solution-aware context if specified
+        self.solution_context = ""
+        if solution:
+            platform_matrix = load_platform_matrix()
+            platform_context = load_platform_context()
+            self.solution_context = build_solution_context(solution, platform_matrix, platform_context)
+            if self.solution_context:
+                solution_data = platform_matrix.get("solutions", {}).get(solution, {})
+                display_name = solution_data.get("display_name", solution)
+                print(f"[SUCCESS] Loaded solution context for: {display_name}")
+            else:
+                print(f"[WARNING] Solution '{solution}' not found in platform_matrix.json")
         
         # Load KB lookup with multiple key formats for backward compatibility
         with open(KB_JSON_PATH, 'r', encoding='utf-8') as f:
@@ -204,14 +318,21 @@ class LLMRouter:
 
     def generate_answer(self, query, model="gemini"):
         context_items = self.retrieve_context(query, k=8)
-        
+
         if not context_items:
             return "Not in KB"
 
         # Build prompt from template
         context_str = self.format_context(context_items)
+
+        # Inject solution context before KB context if available
+        if self.solution_context:
+            full_context = f"{self.solution_context}\n{context_str}"
+        else:
+            full_context = context_str
+
         prompt = self.system_prompt_template.format(
-            context=context_str,
+            context=full_context,
             query=query
         )
 
