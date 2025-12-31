@@ -1,11 +1,12 @@
-# RFP Answer Engine – Cognitive Planning (v0.2)
+# RFP Answer Engine – Multi-Domain (v0.2.1)
 
-This repo hosts an **RFP answer engine** for Blue Yonder's planning platform, focused on **Cognitive / SCP** RFPs.
+This repo hosts an **RFP answer engine** for Blue Yonder solutions, supporting **Planning, AI/ML, WMS**, and future product lines.
 
-The idea:  
+The idea:
 Take historical presales answers → build a **canonical KB** → let LLMs draft answers for new RFPs in **CSV/Excel** form, in a way that is:
 
 - **KB-first**: no hallucinated product facts.
+- **Multi-domain**: Planning, AI/ML, WMS knowledge in unified database.
 - **Multi-LLM**: supports Gemini, Claude, GPT-5, DeepSeek, GLM, and more.
 - **Batch-oriented**: works well with Excel exports.
 - **Privacy-aware**: anonymization layer protects customer names.
@@ -13,7 +14,17 @@ Take historical presales answers → build a **canonical KB** → let LLMs draft
 
 ---
 
-## What's New in v0.2
+## What's New in v0.2.1 (Dec 2024)
+
+| Feature | Description |
+|---------|-------------|
+| **Multi-Domain KB** | Unified KB with Planning (807), AI/ML (54), WMS (38) entries |
+| **KB Workflow Tools** | `kb_transform_knowledge.py` + `kb_merge_canonical.py` for easy domain additions |
+| **Scope Classification** | Auto-classify entries as `platform` vs `product_specific` |
+| **Fixed RAG Retrieval** | Resolved "Not in KB" issue with domain-prefixed ChromaDB IDs |
+| **Debug Mode** | `DEBUG_RAG=1` for detailed retrieval logging |
+
+### Previous (v0.2)
 
 | Feature | Description |
 |---------|-------------|
@@ -82,13 +93,33 @@ ZHIPU_API_KEY=your_key          # Optional: for GLM
 ```
 
 ### 2. Build KB
+
+#### Option A: Transform New Knowledge (Recommended)
+```bash
+# 1. Transform raw knowledge (JSONL) to canonical format
+python scripts/core/kb_transform_knowledge.py \
+    --input data_kb/raw/knowledge_wms.jsonl \
+    --domain wms \
+    --source-type video_workshop \
+    --version 2025.1
+
+# 2. Merge all domain KBs into unified database
+python scripts/core/kb_merge_canonical.py
+
+# 3. Index to ChromaDB (local, free)
+python scripts/core/kb_embed_chroma.py
+```
+
+#### Option B: Use Existing KB (Legacy)
 ```bash
 # Build canonical KB from raw data
 python scripts/core/kb_build_canonical.py
 
-# Index to ChromaDB (local, free)
+# Index to ChromaDB
 python scripts/core/kb_embed_chroma.py
 ```
+
+See [docs/KB_WORKFLOW.md](docs/KB_WORKFLOW.md) for detailed workflow documentation.
 
 ### 3. Run Batch Processor
 ```bash
@@ -100,6 +131,10 @@ python scripts/core/rfp_batch_universal.py --model claude --anonymize
 
 # Short flags
 python scripts/core/rfp_batch_universal.py -t -m deepseek -a -w 8
+
+# Debug mode (see what KB entries are retrieved)
+set DEBUG_RAG=1  # Windows
+DEBUG_RAG=1 python scripts/core/rfp_batch_universal.py -t  # Linux/Mac
 ```
 
 ---
@@ -179,31 +214,42 @@ Final:  "Blue Yonder supports SSO for Walmart..."
 ```
 .
 ├── config/
-│   └── anonymization.yaml      # Blocklist and session config
+│   ├── anonymization.yaml             # Blocklist and session config
+│   └── solution_profiles.json         # Platform services matrix
 ├── data_kb/
-│   ├── raw/                    # Raw historical RFP answers (CSV)
-│   ├── canonical/              # Distilled KB (JSON)
-│   └── chroma_store/           # Local vector database
-├── input_rfp/                  # Production RFP files
-├── input_rfp_test/             # Test RFP files
-├── output_rfp_universal/       # Generated answers
-├── logs/                       # Anonymization logs
+│   ├── raw/                           # Raw knowledge (JSONL from workshops)
+│   ├── canonical/                     # Canonical KB files by domain
+│   │   ├── RFP_Database_AIML_CANONICAL.json
+│   │   ├── RFP_Database_Cognitive_Planning_CANONICAL.json
+│   │   ├── RFP_Database_WMS_CANONICAL.json
+│   │   └── RFP_Database_UNIFIED_CANONICAL.json  # ← Used by system
+│   └── chroma_store/                  # Local vector database
+├── docs/
+│   ├── KB_WORKFLOW.md                 # KB transformation workflow guide
+│   └── BUGFIX_NOT_IN_KB.md            # Recent bugfix documentation
+├── input_rfp/                         # Production RFP files
+├── input_rfp_test/                    # Test RFP files
+├── output_rfp_universal/              # Generated answers
+├── logs/                              # Anonymization logs
 ├── prompts_instructions/
-│   ├── rfp_system_prompt.txt           # Legacy (File Search)
-│   └── rfp_system_prompt_universal.txt # Universal RAG prompt
+│   ├── rfp_system_prompt.txt               # Legacy (File Search)
+│   └── rfp_system_prompt_universal.txt     # Universal RAG prompt
 ├── scripts/
 │   └── core/
-│       ├── kb_build_canonical.py       # Build canonical KB
-│       ├── kb_embed_chroma.py          # Index to ChromaDB
-│       ├── llm_router.py               # Multi-LLM router
-│       ├── rfp_batch_universal.py      # Universal batch processor
+│       ├── kb_transform_knowledge.py       # Transform JSONL → Canonical
+│       ├── kb_merge_canonical.py           # Merge domain KBs → Unified
+│       ├── kb_build_canonical.py           # Legacy KB builder
+│       ├── kb_embed_chroma.py              # Index to ChromaDB
+│       ├── llm_router.py                   # Multi-LLM router + RAG
+│       ├── rfp_batch_universal.py          # Universal batch processor
 │       ├── rfp_batch_gemini_filesearch.py  # Legacy (File Search)
-│       └── anonymization/              # Anonymization package
+│       └── anonymization/                  # Anonymization package
 │           ├── config.py
 │           ├── core.py
 │           ├── middleware.py
 │           ├── scan_kb.py
 │           └── clean_kb.py
+├── CLAUDE.md                          # Project context for Claude Code
 ├── requirements.txt
 └── README.md
 ```
@@ -225,11 +271,17 @@ Options:
 
 ### KB Management
 ```bash
-# Build canonical KB
-python scripts/core/kb_build_canonical.py
+# Transform new knowledge
+python scripts/core/kb_transform_knowledge.py -i data_kb/raw/knowledge.jsonl -d wms
+
+# Merge all domain KBs
+python scripts/core/kb_merge_canonical.py
 
 # Re-index ChromaDB
 python scripts/core/kb_embed_chroma.py
+
+# Legacy KB builder
+python scripts/core/kb_build_canonical.py
 ```
 
 ### Anonymization
@@ -255,9 +307,38 @@ This uses Google's hosted File Search with the store:
 
 ---
 
+## Knowledge Base Statistics
+
+| Domain | Entries | Scope: Platform | Scope: Product-Specific |
+|--------|---------|-----------------|-------------------------|
+| Planning | 807 | - | - |
+| AI/ML | 54 | - | - |
+| WMS | 38 | 10 | 28 |
+| **Total** | **899** | **10** | **28** |
+
+Knowledge is automatically classified by:
+- **Domain**: planning, aiml, wms, catman, logistics
+- **Scope**: platform (shared across products) vs product_specific
+- **Category**: SLA, Integration, Security, WMS Features, etc.
+
+---
+
+## Documentation
+
+- **[KB Workflow Guide](docs/KB_WORKFLOW.md)** - How to add new knowledge to the system
+- **[Bugfix: "Not in KB"](docs/BUGFIX_NOT_IN_KB.md)** - Resolved RAG retrieval issue
+- **[CLAUDE.md](CLAUDE.md)** - Project context for AI assistants
+
+---
+
 ## Roadmap
 
-- [ ] Add `--solution` flag for WMS/CatMan RFPs
+- [x] Multi-domain KB support (Planning, AI/ML, WMS)
+- [x] Scope classification (platform vs product_specific)
+- [x] Debug mode for RAG retrieval
+- [ ] Add `--solution` flag for filtering by product
+- [ ] Deprecation system for versioned KB entries
+- [ ] Add CatMan and Logistics domains
 - [ ] Hybrid mode: Google File Search + local RAG
 - [ ] Local LLM support (Ollama + Mistral)
 - [ ] A/B testing across models

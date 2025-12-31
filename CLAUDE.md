@@ -191,6 +191,22 @@ XAI_API_KEY=...          # Grok
 
 ## Recent Changes
 
+### 2024-12-31
+- **BUGFIX:** Fixed "Not in KB" issue in `rfp_batch_universal.py`
+  - Root cause: ChromaDB IDs (`planning_kb_0001`) didn't match KB lookup keys (`kb_0001`)
+  - Solution: Updated `llm_router.py` to build lookup dict with both formats
+  - Changed KB path from Planning-only to Unified KB (`RFP_Database_UNIFIED_CANONICAL.json`)
+  - Added DEBUG_RAG=1 env var for retrieval debugging
+  - Removed all emojis for Windows console compatibility
+- **INTEGRATION:** Completed `kb_transform_knowledge.py` + `kb_merge_canonical.py` workflow
+  - Auto-discovery of canonical files by domain
+  - Dynamic merge without hardcoded file lists
+  - Support for WMS and future domains
+- **CHROMADB:** Fixed ID uniqueness across domains
+  - Format: `{domain}_{kb_id}` (e.g., `planning_kb_0001`, `wms_0001`)
+  - Updated `kb_embed_chroma.py` to generate domain-prefixed IDs
+  - Verified 899 entries indexed successfully
+
 ### 2024-12-30
 - Created `kb_transform_knowledge.py` - universal transformer for JSONL → Canonical
 - Created `solution_profiles.json` from Platform_Usage_by_Product.xlsx
