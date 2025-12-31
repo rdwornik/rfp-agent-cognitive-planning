@@ -22,7 +22,7 @@ RFP Questions (Excel) → Anonymization → RAG Retrieval → LLM Generation →
 ### Knowledge Base Structure
 | Domain | File | Entries | Description |
 |--------|------|---------|-------------|
-| planning | RFP_Database_Cognitive_Planning_CANONICAL.json | ~100 | Cognitive Planning Q&A (most complete) |
+| planning | RFP_Database_Cognitive_Planning_CANONICAL.json | 807 | Cognitive Planning Q&A (most complete) |
 | aiml | RFP_Database_AIML_CANONICAL.json | 54 | AI/ML capabilities |
 | wms | RFP_Database_WMS_CANONICAL.json | 38 | Warehouse Management (from video workshops) |
 
@@ -66,7 +66,7 @@ rfp-answer-engine/
 │
 ├── config/
 │   ├── anonymization.yaml             # Blocklist and session config
-│   └── solution_profiles.json         # Platform services matrix (from Excel)
+│   └── platform_matrix.json           # Platform services matrix (from Excel)
 │
 ├── data_kb/
 │   ├── raw/                           # Source files (JSONL from workshops)
@@ -220,7 +220,7 @@ XAI_API_KEY=...          # Grok
 
 ### 2024-12-30
 - Created `kb_transform_knowledge.py` - universal transformer for JSONL → Canonical
-- Created `solution_profiles.json` from Platform_Usage_by_Product.xlsx
+- Created `platform_matrix.json` from Platform_Usage_by_Product.xlsx
 - Transformed WMS knowledge: 38 entries (10 platform, 28 product-specific)
 - Added versioning schema to KB entries
 - Added scope classification (platform vs product_specific)

@@ -85,7 +85,7 @@ pip install -r requirements.txt
 ```
 
 Create `.env` file:
-```bash
+```env
 GEMINI_API_KEY=your_key
 ANTHROPIC_API_KEY=your_key      # Optional: for Claude
 OPENAI_API_KEY=your_key         # Optional: for GPT-5
@@ -134,8 +134,8 @@ python scripts/core/rfp_batch_universal.py --model claude --anonymize
 python scripts/core/rfp_batch_universal.py --solution wms_native
 python scripts/core/rfp_batch_universal.py --solution planning -m claude
 
-# Combined flags
-python scripts/core/rfp_batch_universal.py -t -m deepseek -a -w 8 --solution wms
+# Combined flags (all short form)
+python scripts/core/rfp_batch_universal.py -t -m deepseek -a -w 8 -s wms
 
 # Debug mode (see what KB entries are retrieved)
 set DEBUG_RAG=1  # Windows
@@ -220,7 +220,7 @@ Final:  "Blue Yonder supports SSO for Walmart..."
 .
 ├── config/
 │   ├── anonymization.yaml             # Blocklist and session config
-│   └── solution_profiles.json         # Platform services matrix
+│   └── platform_matrix.json           # Platform services matrix
 ├── data_kb/
 │   ├── raw/                           # Raw knowledge (JSONL from workshops)
 │   ├── canonical/                     # Canonical KB files by domain
@@ -272,7 +272,7 @@ Options:
   -m, --model MODEL   LLM to use (default: gemini)
   -w, --workers N     Parallel workers (default: 4)
   -a, --anonymize     Enable anonymization
-  -s, --solution CODE Solution-aware context (e.g., wms, planning, wms_native)
+  -s, --solution CODE Solution-aware context (41 solutions available; see config/platform_matrix.json)
 ```
 
 ### KB Management
@@ -333,6 +333,7 @@ Knowledge is automatically classified by:
 
 - **[KB Workflow Guide](docs/KB_WORKFLOW.md)** - How to add new knowledge to the system
 - **[Bugfix: "Not in KB"](docs/BUGFIX_NOT_IN_KB.md)** - Resolved RAG retrieval issue
+- **[Platform Context Guide](docs/platform_context.md)** - Response framing for solution-aware RFP answers
 - **[CLAUDE.md](CLAUDE.md)** - Project context for AI assistants
 
 ---
