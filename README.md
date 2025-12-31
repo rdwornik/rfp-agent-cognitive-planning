@@ -18,6 +18,7 @@ Take historical presales answers → build a **canonical KB** → let LLMs draft
 
 | Feature | Description |
 |---------|-------------|
+| **Solution-Aware Responses** | `--solution` flag injects platform service context for product-specific answers |
 | **Multi-Domain KB** | Unified KB with Planning (807), AI/ML (54), WMS (38) entries |
 | **KB Workflow Tools** | `kb_transform_knowledge.py` + `kb_merge_canonical.py` for easy domain additions |
 | **Scope Classification** | Auto-classify entries as `platform` vs `product_specific` |
@@ -129,8 +130,12 @@ python scripts/core/rfp_batch_universal.py --test --model gemini
 # Production with Claude + anonymization
 python scripts/core/rfp_batch_universal.py --model claude --anonymize
 
-# Short flags
-python scripts/core/rfp_batch_universal.py -t -m deepseek -a -w 8
+# Solution-aware mode (platform service integration context)
+python scripts/core/rfp_batch_universal.py --solution wms_native
+python scripts/core/rfp_batch_universal.py --solution planning -m claude
+
+# Combined flags
+python scripts/core/rfp_batch_universal.py -t -m deepseek -a -w 8 --solution wms
 
 # Debug mode (see what KB entries are retrieved)
 set DEBUG_RAG=1  # Windows
@@ -267,6 +272,7 @@ Options:
   -m, --model MODEL   LLM to use (default: gemini)
   -w, --workers N     Parallel workers (default: 4)
   -a, --anonymize     Enable anonymization
+  -s, --solution CODE Solution-aware context (e.g., wms, planning, wms_native)
 ```
 
 ### KB Management
@@ -331,12 +337,38 @@ Knowledge is automatically classified by:
 
 ---
 
+## Solution-Aware Response System
+
+The `--solution` flag enables product-specific platform service context injection:
+
+**How it works:**
+1. Loads `config/platform_matrix.json` with 41 solutions and platform service statuses
+2. Injects solution-specific context into LLM prompts
+3. Adjusts response framing based on integration level:
+   - **Native**: "[Capability] for [Product] is configured through Blue Yonder Platform"
+   - **Planned**: "Blue Yonder Platform supports this on infrastructure level and full native integration is planned"
+   - **Infrastructure**: "Blue Yonder Platform supports this functionality on an infrastructure level"
+
+**Available Solutions (41):**
+- Planning: `planning`, `planning_ibp`, `planning_pps`
+- WMS: `wms`, `wms_native`, `wms_labor`, `wms_tasking`, `wms_billing`, `wms_robotics`
+- Logistics: `logistics`, `logistics_ba`, `logistics_modeling`, `logistics_fom`, etc.
+- Retail: `retail_ar`, `retail_ap`, `retail_clearance`, `retail_markdown`, etc.
+- And more (see `config/platform_matrix.json`)
+
+**Example Usage:**
+```bash
+python rfp_batch_universal.py --solution wms_native -m claude
+```
+
+---
+
 ## Roadmap
 
 - [x] Multi-domain KB support (Planning, AI/ML, WMS)
 - [x] Scope classification (platform vs product_specific)
 - [x] Debug mode for RAG retrieval
-- [ ] Add `--solution` flag for filtering by product
+- [x] Solution-aware response system with platform service context
 - [ ] Deprecation system for versioned KB entries
 - [ ] Add CatMan and Logistics domains
 - [ ] Hybrid mode: Google File Search + local RAG

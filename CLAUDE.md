@@ -191,6 +191,17 @@ XAI_API_KEY=...          # Grok
 
 ## Recent Changes
 
+### 2025-01-01
+- **FEATURE:** Solution-aware response system with platform service context
+  - Added `--solution` flag to `rfp_batch_universal.py` (41 solutions available)
+  - Integrated `config/platform_matrix.json` for service status lookup
+  - Added `docs/platform_context.md` with response templates
+  - Updated `llm_router.py` to inject solution-specific context before KB context
+  - Context includes: native/planned/infrastructure service lists
+  - Response framing adjusts based on integration level
+  - NEVER exposes version numbers or roadmap dates to customer
+  - Used Opus model for complex integration task
+
 ### 2024-12-31
 - **BUGFIX:** Fixed "Not in KB" issue in `rfp_batch_universal.py`
   - Root cause: ChromaDB IDs (`planning_kb_0001`) didn't match KB lookup keys (`kb_0001`)
