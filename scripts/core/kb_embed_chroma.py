@@ -20,30 +20,30 @@ COLLECTION_NAME = "rfp_knowledge_base"
 
 def build_index():
     if not KB_PATH.exists():
-        print(f"❌ Error: Could not find {KB_PATH}")
+        print(f"[ERROR] Could not find {KB_PATH}")
         print(f"   Run kb_merge_canonical.py first!")
         return
-    
-    print(f"📖 Reading {KB_PATH.name}...")
+
+    print(f"[INFO] Reading {KB_PATH.name}...")
     with open(KB_PATH, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    
-    print(f"📊 Total entries: {len(data)}")
-    
+
+    print(f"[STATS] Total entries: {len(data)}")
+
     # Initialize ChromaDB
     client = chromadb.PersistentClient(path=DB_PATH)
-    
-    print("⚙️  Loading embedding model (BAAI/bge-large-en-v1.5)...")
+
+    print("[INFO] Loading embedding model (BAAI/bge-large-en-v1.5)...")
     ef = embedding_functions.SentenceTransformerEmbeddingFunction(
         model_name="BAAI/bge-large-en-v1.5"
     )
-    
+
     # Clean start
     try:
         client.delete_collection(name=COLLECTION_NAME)
-        print("🗑️  Cleared old collection.")
+        print("[INFO] Cleared old collection.")
     except Exception:
-        print("ℹ️  No existing collection to clear.")
+        print("[INFO] No existing collection to clear.")
     
     collection = client.create_collection(
         name=COLLECTION_NAME, 
@@ -53,26 +53,39 @@ def build_index():
     documents = []
     metadatas = []
     ids = []
-    
-    print(f"🧩 Processing {len(data)} items...")
-    
+
+    print(f"[INFO] Processing {len(data)} items...")
+
     for idx, item in enumerate(data):
         doc_text = item.get("search_blob", "")
         if not doc_text:
             doc_text = f"{item.get('canonical_question', '')} {item.get('canonical_answer', '')}"
-        
+
         if not doc_text.strip():
             continue
-        
+
         documents.append(doc_text)
-        
+
         full_answer = item.get("canonical_answer", "")
         safe_answer = full_answer[:1000] + "..." if len(full_answer) > 1000 else full_answer
+
+        # Get domain and kb_id
+        domain = item.get("domain", "planning")
         kb_id = item.get("kb_id", f"kb_{idx:04d}")
-        
+
+        # Ensure ChromaDB ID is unique across domains
+        # Format: {domain}_{kb_id} or just use kb_id if it already has domain prefix
+        if kb_id.startswith(f"{domain}_"):
+            # Already has domain prefix (e.g., "wms_0001")
+            chroma_id = kb_id
+        else:
+            # Legacy format without domain prefix (e.g., "kb_0001" or "0001")
+            # Add domain prefix to ensure uniqueness
+            chroma_id = f"{domain}_{kb_id}"
+
         meta = {
             "kb_id": str(kb_id),
-            "domain": str(item.get("domain", "planning")),
+            "domain": str(domain),
             "category": str(item.get("category", "")),
             "subcategory": str(item.get("subcategory", "")),
             "canonical_question": str(item.get("canonical_question", "")),
@@ -80,7 +93,7 @@ def build_index():
             "last_updated": str(item.get("last_updated", "")),
         }
         metadatas.append(meta)
-        ids.append(str(kb_id))
+        ids.append(str(chroma_id))
     
     # Batch Insert
     batch_size = 100
@@ -98,9 +111,11 @@ def build_index():
     for m in metadatas:
         d = m.get("domain", "unknown")
         domain_counts[d] = domain_counts.get(d, 0) + 1
-    
-    print(f"\n✅ Indexed {len(documents)} items")
-    print(f"   Breakdown: {domain_counts}")
+
+    print(f"\n[SUCCESS] Indexed {len(documents)} items")
+    print(f"[STATS] Domain breakdown:")
+    for domain, count in sorted(domain_counts.items()):
+        print(f"   {domain}: {count}")
 
 
 if __name__ == "__main__":

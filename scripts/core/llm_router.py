@@ -21,10 +21,11 @@ except ImportError:
 
 # --- CONFIGURATION ---
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-KB_JSON_PATH = PROJECT_ROOT / "data_kb/canonical/RFP_Database_Cognitive_Planning_CANONICAL.json"
+KB_JSON_PATH = PROJECT_ROOT / "data_kb/canonical/RFP_Database_UNIFIED_CANONICAL.json"
 DB_PATH = PROJECT_ROOT / "data_kb/chroma_store"
 COLLECTION_NAME = "rfp_knowledge_base"
 SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts_instructions/rfp_system_prompt_universal.txt"
+DEBUG = os.environ.get("DEBUG_RAG", "0") == "1"  # Set DEBUG_RAG=1 to enable debug logging
 
 # --- MODEL REGISTRY ---
 MODELS = {
@@ -87,7 +88,7 @@ def retry_with_backoff(func, max_retries=5, base_delay=2):
             # Check for rate limit errors (429, 1302, concurrency)
             if "429" in error_str or "1302" in error_str or "concurrency" in error_str.lower():
                 delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                print(f"   ⚠️ Rate limited. Retry {attempt + 1}/{max_retries} in {delay:.1f}s...")
+                print(f"   [WARNING] Rate limited. Retry {attempt + 1}/{max_retries} in {delay:.1f}s...")
                 time.sleep(delay)
             else:
                 raise  # Re-raise non-rate-limit errors
@@ -95,18 +96,37 @@ def retry_with_backoff(func, max_retries=5, base_delay=2):
 
 class LLMRouter:
     def __init__(self):
-        print("⚙️  Initializing Universal LLM Router...")
-        
+        print("[INFO] Initializing Universal LLM Router...")
+
         # Load system prompt
         self.system_prompt_template = load_system_prompt()
-        print(f"✅ Loaded prompt from: {SYSTEM_PROMPT_PATH.name}")
+        print(f"[SUCCESS] Loaded prompt from: {SYSTEM_PROMPT_PATH.name}")
         
-        # Load KB lookup
+        # Load KB lookup with multiple key formats for backward compatibility
         with open(KB_JSON_PATH, 'r', encoding='utf-8') as f:
             raw_data = json.load(f)
-            self.kb_lookup = {item.get("kb_id"): item for item in raw_data}
-        print(f"✅ Loaded {len(self.kb_lookup)} KB entries")
-        
+            self.kb_lookup = {}
+
+            for item in raw_data:
+                kb_id = item.get("kb_id")
+                domain = item.get("domain", "")
+
+                # Store with original kb_id
+                if kb_id:
+                    self.kb_lookup[kb_id] = item
+
+                    # Also store with domain-prefixed version for ChromaDB compatibility
+                    # Handle both legacy (kb_0001) and new (wms_0001) formats
+                    if domain:
+                        # If kb_id doesn't already have domain prefix, add it
+                        if not kb_id.startswith(f"{domain}_"):
+                            prefixed_id = f"{domain}_{kb_id}"
+                            self.kb_lookup[prefixed_id] = item
+
+        print(f"[SUCCESS] Loaded {len(raw_data)} KB entries from unified database")
+        if DEBUG:
+            print(f"[DEBUG] Total lookup keys (with domain prefixes): {len(self.kb_lookup)}")
+
         # Connect to ChromaDB
         self.client_db = chromadb.PersistentClient(path=str(DB_PATH))
         self.ef = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -116,15 +136,57 @@ class LLMRouter:
             name=COLLECTION_NAME,
             embedding_function=self.ef
         )
-        print(f"✅ Connected to ChromaDB: {COLLECTION_NAME}")
+        print(f"[SUCCESS] Connected to ChromaDB: {COLLECTION_NAME}")
 
     def retrieve_context(self, query, k=8):
+        """
+        Retrieve relevant KB entries for a query.
+
+        Returns list of KB items (dicts with canonical_question, canonical_answer, etc.)
+        """
         results = self.collection.query(query_texts=[query], n_results=k)
         found_items = []
-        if results['ids']:
-            for kb_id in results['ids'][0]:
-                if kb_id in self.kb_lookup:
-                    found_items.append(self.kb_lookup[kb_id])
+
+        if DEBUG:
+            print(f"\n[DEBUG] === RAG Retrieval ===")
+            print(f"[DEBUG] Query: {query}")
+            print(f"[DEBUG] Requested k={k} results")
+
+        if results['ids'] and len(results['ids']) > 0:
+            chroma_ids = results['ids'][0]
+            distances = results['distances'][0] if 'distances' in results else [None] * len(chroma_ids)
+
+            if DEBUG:
+                print(f"[DEBUG] ChromaDB returned {len(chroma_ids)} IDs")
+
+            for i, chroma_id in enumerate(chroma_ids):
+                distance = distances[i]
+
+                if DEBUG:
+                    print(f"[DEBUG] {i+1}. ChromaDB ID: {chroma_id} | Distance: {distance}")
+
+                # Lookup in KB dictionary
+                if chroma_id in self.kb_lookup:
+                    item = self.kb_lookup[chroma_id]
+                    found_items.append(item)
+
+                    if DEBUG:
+                        domain = item.get('domain', 'N/A')
+                        kb_id = item.get('kb_id', 'N/A')
+                        question = item.get('canonical_question', '')[:60]
+                        print(f"[DEBUG]    [OK] Found: domain={domain} | kb_id={kb_id} | Q={question}...")
+                else:
+                    if DEBUG:
+                        print(f"[DEBUG]    [FAIL] NOT FOUND in kb_lookup! (ID: {chroma_id})")
+
+            if DEBUG:
+                print(f"[DEBUG] Total items retrieved: {len(found_items)}/{k}")
+                print(f"[DEBUG] === End RAG Retrieval ===\n")
+        else:
+            if DEBUG:
+                print(f"[DEBUG] ChromaDB returned NO results!")
+                print(f"[DEBUG] === End RAG Retrieval ===\n")
+
         return found_items
 
     def format_context(self, items) -> str:
@@ -157,7 +219,7 @@ class LLMRouter:
         provider = model_config["provider"]
         model_name = model_config["name"]
 
-        print(f"🧠 Generating with {model.upper()} ({model_name})...")
+        print(f"[INFO] Generating with {model.upper()} ({model_name})...")
 
         try:
             # --- GOOGLE GEMINI ---
@@ -325,6 +387,6 @@ if __name__ == "__main__":
     answer = router.generate_answer(q, model="gemini")
     
     print("\n" + "="*50)
-    print("🤖 ANSWER:")
+    print("[ANSWER]")
     print("="*50)
     print(answer)
