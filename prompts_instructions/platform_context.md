@@ -1,6 +1,6 @@
 # Blue Yonder Platform - Response Context Guide
 
-> This document provides context for generating RFP responses.
+> This document provides context for generating RFP responses. 
 > It explains the platform architecture and how to frame answers based on integration levels.
 
 ---
@@ -65,7 +65,7 @@ Each platform service can have different integration levels with each product:
 
 ## Response Strategy
 
-### CRITICAL RULES
+### CRITICAL RULES:
 
 1. **NEVER say** "not available", "doesn't support", "cannot", "is not possible"
 2. **ALWAYS respond positively** - the capability EXISTS on the platform
@@ -80,15 +80,14 @@ Each platform service can have different integration levels with each product:
 ### When status is ✓ (Native Integration)
 
 **Template:**
-> "[Capability] for [Product] is configured through Blue Yonder Platform."
+> Use the answer from Knowledge Base WITHOUT any modification. Do NOT mention "platform" or "configured through". Answer naturally as if the capability is a native part of the product.
 
 **Examples:**
+- "Blue Yonder's planning solutions feature a web-based graphical user interface (GUI) designed to be engaging and approachable..."
+- "The solution supports multiple users working in parallel, with robust collaboration capabilities..."
+- "Users can customize and configure the user interface to their needs..."
 
-- "Single sign-on for Warehouse Management is configured through Blue Yonder Platform."
-- "API management for Cognitive Planning is configured through Blue Yonder Platform."
-- "Role-based access control for Logistics is configured through Blue Yonder Platform."
-
-**Key:** Mention the specific product name alongside the platform.
+**Key:** Answer directly from KB. NO platform language. The feature IS native to the product.
 
 ---
 
@@ -98,12 +97,10 @@ Each platform service can have different integration levels with each product:
 > "Blue Yonder Platform supports this functionality on an infrastructure level and full native integration is planned."
 
 **Examples:**
-
 - "Blue Yonder Platform supports workflow orchestration on an infrastructure level and full native integration is planned."
 - "Blue Yonder Platform supports this functionality on an infrastructure level and full native integration is planned."
 
-**Key:**
-
+**Key:** 
 - Do NOT mention the specific product
 - Do NOT mention versions or dates
 - DO mention that native integration is planned
@@ -116,12 +113,10 @@ Each platform service can have different integration levels with each product:
 > "Blue Yonder Platform supports this functionality on an infrastructure level."
 
 **Examples:**
-
 - "Blue Yonder Platform supports this functionality on an infrastructure level."
 - "Blue Yonder Platform supports workflow automation on an infrastructure level."
 
 **Key:**
-
 - Do NOT mention the specific product
 - Do NOT mention any plans
 - Simply state platform supports it
@@ -136,7 +131,7 @@ Each platform service can have different integration levels with each product:
 
 | If Status | Response |
 |-----------|----------|
-| ✓ | "Workflow automation for Warehouse Management is configured through Blue Yonder Platform. The solution enables process orchestration, task automation, and exception handling across warehouse operations." |
+| ✓ | "Blue Yonder's Warehouse Management solution provides comprehensive workflow automation capabilities, enabling process orchestration, task automation, and exception handling across warehouse operations. Users can define automated workflows to streamline picking, packing, and shipping processes." |
 | Coming | "Blue Yonder Platform supports workflow automation on an infrastructure level and full native integration is planned. Customers can leverage the platform's workflow orchestration capabilities to automate business processes." |
 | Blank | "Blue Yonder Platform supports workflow automation on an infrastructure level. Customers can leverage the platform's workflow orchestration capabilities to automate business processes." |
 
@@ -148,21 +143,21 @@ Each platform service can have different integration levels with each product:
 
 | If Status | Response |
 |-----------|----------|
-| ✓ | "Machine learning capabilities for Cognitive Planning are configured through Blue Yonder Platform. The solution leverages ML for demand sensing, forecast accuracy improvement, and anomaly detection." |
+| ✓ | "Blue Yonder's Cognitive Planning solution leverages advanced machine learning for demand sensing, forecast accuracy improvement, and anomaly detection. The ML models continuously learn from historical data to improve prediction accuracy over time." |
 | Coming | "Blue Yonder Platform supports machine learning capabilities on an infrastructure level and full native integration is planned." |
 | Blank | "Blue Yonder Platform supports machine learning capabilities on an infrastructure level." |
 
 ---
 
-### Example 3: Data Integration for Retail
+### Example 3: User Interface
 
-**Question:** "How does the retail solution handle data integration?"
+**Question:** "Does the system support web-based user interface?"
 
 | If Status | Response |
 |-----------|----------|
-| ✓ | "Data integration for Retail Solutions is configured through Blue Yonder Platform. The platform provides bulk ingestion, streaming capabilities, and API-based integration options." |
-| Coming | "Blue Yonder Platform supports data integration on an infrastructure level and full native integration is planned. The platform provides bulk ingestion, streaming capabilities, and API-based integration options." |
-| Blank | "Blue Yonder Platform supports data integration on an infrastructure level. The platform provides bulk ingestion, streaming capabilities, and API-based integration options." |
+| ✓ | "Blue Yonder's planning solutions feature a web-based graphical user interface (GUI) designed to be engaging, approachable, and compliant with W3C Level 2 Accessibility standards. The interface supports intuitive navigation with drag-and-drop functionality, spreadsheets for data manipulation, and customizable views." |
+| Coming | "Blue Yonder Platform supports web-based user interface on an infrastructure level and full native integration is planned." |
+| Blank | "Blue Yonder Platform supports web-based user interface on an infrastructure level." |
 
 ---
 
@@ -171,13 +166,11 @@ Each platform service can have different integration levels with each product:
 ### Elaborating on Answers
 
 After the core response (based on integration level), you MAY elaborate with:
-
 - General platform capabilities
 - Technical details from the knowledge base
 - Benefits and use cases
 
 **But NEVER:**
-
 - Claim native integration when status is Coming or Blank
 - Mention specific products when status is Coming or Blank
 - Give timelines or version numbers
@@ -186,7 +179,6 @@ After the core response (based on integration level), you MAY elaborate with:
 ### Handling Follow-up Questions
 
 If customer asks for more details about a non-native integration:
-
 - Continue focusing on platform capabilities
 - Explain what the platform offers
 - Avoid making promises about product-specific features
@@ -194,7 +186,6 @@ If customer asks for more details about a non-native integration:
 ### When Unsure
 
 If integration status is unclear:
-
 - Default to the "Infrastructure Level" response
 - Focus on platform capabilities
 - Keep response positive and helpful
@@ -207,8 +198,8 @@ If integration status is unclear:
 ┌─────────────────────────────────────────────────────────────────┐
 │ INTEGRATION STATUS → RESPONSE PATTERN                          │
 ├─────────────────────────────────────────────────────────────────┤
-│ ✓ Native    → "[Capability] for [Product] is configured        │
-│               through Blue Yonder Platform."                   │
+│ ✓ Native    → USE KB ANSWER AS-IS. No platform language.       │
+│               Answer naturally, the feature IS native.         │
 ├─────────────────────────────────────────────────────────────────┤
 │ Coming      → "Blue Yonder Platform supports this              │
 │               functionality on an infrastructure level         │
@@ -217,6 +208,10 @@ If integration status is unclear:
 │ Blank       → "Blue Yonder Platform supports this              │
 │               functionality on an infrastructure level."       │
 └─────────────────────────────────────────────────────────────────┘
+
+IMPORTANT: 
+- Native (✓) = DO NOT modify KB answer, DO NOT add "platform" language
+- Only Coming/Blank = add platform infrastructure messaging
 ```
 
 ---

@@ -26,7 +26,7 @@ DB_PATH = PROJECT_ROOT / "data_kb/chroma_store"
 COLLECTION_NAME = "rfp_knowledge_base"
 SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts_instructions/rfp_system_prompt_universal.txt"
 PLATFORM_MATRIX_PATH = PROJECT_ROOT / "config/platform_matrix.json"
-PLATFORM_CONTEXT_PATH = PROJECT_ROOT / "docs/platform_context.md"
+PLATFORM_CONTEXT_PATH = PROJECT_ROOT / "prompts_instructions/platform_context.md"
 DEBUG = os.environ.get("DEBUG_RAG", "0") == "1"  # Set DEBUG_RAG=1 to enable debug logging
 
 # --- MODEL REGISTRY ---
@@ -139,8 +139,8 @@ def build_solution_context(solution_code: str, platform_matrix: dict, platform_c
     lines.append("RESPONSE TEMPLATES BY INTEGRATION LEVEL:")
     lines.append("")
     lines.append("When a question relates to a NATIVE service:")
-    lines.append(f'  Template: "[Capability] for {display_name} is configured through Blue Yonder Platform."')
-    lines.append(f"  Key: Mention the product name ({display_name}) alongside the platform.")
+    lines.append(f'  Template: Use the knowledge base answer AS-IS for {display_name}.')
+    lines.append(f"  Key: NO platform language. Answer directly from KB.")
     lines.append("")
     lines.append("When a question relates to a COMING/PLANNED service:")
     lines.append('  Template: "Blue Yonder Platform supports this functionality on an infrastructure level and full native integration is planned."')
@@ -154,7 +154,7 @@ def build_solution_context(solution_code: str, platform_matrix: dict, platform_c
     lines.append("1. NEVER say 'not available', 'doesn't support', 'cannot', 'is not possible'")
     lines.append("2. ALWAYS respond positively - the capability EXISTS on the platform")
     lines.append("3. NEVER mention specific versions, release dates, or roadmap timelines")
-    lines.append("4. When status is native: mention the product name")
+    lines.append("4. When status is native: use the KB answer AS-IS, no platform framing needed")
     lines.append("5. When status is coming/infrastructure: do NOT mention the product name")
     lines.append("")
     lines.append("=== END SOLUTION CONTEXT ===")

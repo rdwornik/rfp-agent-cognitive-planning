@@ -44,6 +44,40 @@ sys.path.insert(0, str(PROJECT_ROOT / "scripts/core"))
 from llm_router import LLMRouter
 from anonymization import AnonymizationMiddleware
 
+
+def call_llm_with_retry(llm_func, *args, max_retries=3, **kwargs):
+    """Wrapper for LLM calls with exponential backoff retry for rate limits."""
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            result = llm_func(*args, **kwargs)
+
+            # Check if result contains error message
+            if isinstance(result, str) and ('429' in result or 'RESOURCE_EXHAUSTED' in result):
+                raise Exception(f"Rate limit error in response: {result[:100]}")
+
+            return result
+
+        except Exception as e:
+            error_str = str(e)
+            last_error = e
+
+            # Check for rate limit errors
+            if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'quota' in error_str.lower():
+                wait_time = 30 * (2 ** attempt)  # 30s, 60s, 120s
+
+                if attempt < max_retries - 1:
+                    print(f"[RETRY] Rate limited, waiting {wait_time}s before retry {attempt + 1}/{max_retries}...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"[ERROR] Rate limit exceeded after {max_retries} retries")
+            else:
+                # Non-rate-limit error, don't retry
+                raise e
+
+    return f"ERROR: Rate limit exceeded after {max_retries} retries"
+
 # --- CONFIGURATION ---
 PLATFORM_MATRIX_PATH = PROJECT_ROOT / "config/platform_matrix.json"
 
@@ -367,8 +401,8 @@ def process_single_question(
         # Anonymize before LLM call
         clean_question, ctx = middleware.before(question_text)
 
-        # Call LLM
-        answer = router.generate_answer(clean_question, model=model)
+        # Call LLM with retry wrapper for rate limit handling
+        answer = call_llm_with_retry(router.generate_answer, clean_question, model=model)
 
         # De-anonymize response
         final_answer = middleware.after(answer, ctx)
