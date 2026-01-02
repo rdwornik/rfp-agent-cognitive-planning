@@ -210,8 +210,11 @@ class LLMRouter:
         print(f"[SUCCESS] Loaded prompt from: {SYSTEM_PROMPT_PATH.name}")
 
         # Load solution-aware context if specified
+        # NOTE: Planning solutions don't need platform context - KB was designed for them
         self.solution_context = ""
-        if solution:
+        PLANNING_SOLUTIONS = {"planning", "planning_ibp", "planning_production", "demand", "supply"}
+
+        if solution and solution not in PLANNING_SOLUTIONS:
             platform_matrix = load_platform_matrix()
             platform_context = load_platform_context()
             self.solution_context = build_solution_context(solution, platform_matrix, platform_context)
@@ -221,6 +224,8 @@ class LLMRouter:
                 print(f"[SUCCESS] Loaded solution context for: {display_name}")
             else:
                 print(f"[WARNING] Solution '{solution}' not found in platform_matrix.json")
+        elif solution in PLANNING_SOLUTIONS:
+            print(f"[INFO] Solution '{solution}' uses KB directly (no platform context needed)")
         
         # Load KB lookup with multiple key formats for backward compatibility
         with open(KB_JSON_PATH, 'r', encoding='utf-8') as f:
@@ -340,7 +345,7 @@ class LLMRouter:
         prompt = self.system_prompt_template.format(
             context=full_context,
             query=query
-        )
+        )Skoro uważasz, że problem jest w LLM router, to przeanalizuj go. Przeanalizuj ten plik.
 
         model_config = MODELS.get(model, MODELS["gemini"])
         provider = model_config["provider"]
