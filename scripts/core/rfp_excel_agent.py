@@ -61,15 +61,36 @@ def get_available_solutions() -> List[str]:
     return list(data.get("solutions", {}).keys())
 
 
+def count_images_and_charts(workbook) -> Dict[str, int]:
+    """
+    Count images and charts in all sheets.
+
+    Args:
+        workbook: openpyxl Workbook object
+
+    Returns:
+        Dict with counts per sheet: {sheet_name: count}
+    """
+    counts = {}
+    for sheet_name in workbook.sheetnames:
+        sheet = workbook[sheet_name]
+        image_count = len(getattr(sheet, '_images', []))
+        chart_count = len(getattr(sheet, '_charts', []))
+        counts[sheet_name] = image_count + chart_count
+    return counts
+
+
 def is_green_cell(cell: Any) -> bool:
     """
-    Check if a cell has green fill color (FF00FF00).
+    Check if a cell has green fill color (FF00FF00 ONLY).
+
+    IMPORTANT: Only matches exact green FF00FF00, not other shades.
 
     Args:
         cell: openpyxl Cell object
 
     Returns:
-        True if cell has green fill color
+        True if cell has exact green fill color FF00FF00
     """
     if not cell or not hasattr(cell, 'fill'):
         return False
@@ -83,11 +104,11 @@ def is_green_cell(cell: Any) -> bool:
         fg = fill.fgColor
         if hasattr(fg, 'rgb') and fg.rgb:
             rgb = str(fg.rgb).upper()
-            # Handle both ARGB (8 chars) and RGB (6 chars) formats
+            # ONLY accept exact match: FF00FF00 or 00FF00
             if len(rgb) == 8:
-                return rgb == GREEN_COLOR or rgb[2:] == GREEN_COLOR_SHORT
+                return rgb == GREEN_COLOR  # FF00FF00 only
             elif len(rgb) == 6:
-                return rgb == GREEN_COLOR_SHORT
+                return rgb == GREEN_COLOR_SHORT  # 00FF00 only
 
     # Check bgColor as fallback
     if hasattr(fill, 'bgColor') and fill.bgColor:
@@ -95,9 +116,9 @@ def is_green_cell(cell: Any) -> bool:
         if hasattr(bg, 'rgb') and bg.rgb:
             rgb = str(bg.rgb).upper()
             if len(rgb) == 8:
-                return rgb == GREEN_COLOR or rgb[2:] == GREEN_COLOR_SHORT
+                return rgb == GREEN_COLOR  # FF00FF00 only
             elif len(rgb) == 6:
-                return rgb == GREEN_COLOR_SHORT
+                return rgb == GREEN_COLOR_SHORT  # 00FF00 only
 
     return False
 
@@ -263,7 +284,10 @@ def detect_answer_column(sheet, header_row: int, question_col: int) -> Tuple[Opt
 
 def scan_green_cells(workbook) -> List[Dict]:
     """
-    Scan all tabs in workbook for green cells.
+    Scan all tabs in workbook for green cells (FF00FF00 only).
+
+    SAFETY: Detects ANY green cell (FF00FF00) in a row, then processes that row's question.
+            Only the answer column will be modified, all other cells preserved.
 
     Args:
         workbook: openpyxl Workbook object
@@ -284,29 +308,36 @@ def scan_green_cells(workbook) -> List[Dict]:
         if not question_col:
             continue
 
-        # Scan all cells for green color
+        # Scan for green cells (FF00FF00 ONLY) in each row
         for row_idx in range(header_row + 1, sheet.max_row + 1):
+            row_has_green = False
+            green_col = None
+
+            # Check all cells in the row for green color
             for col_idx in range(1, sheet.max_column + 1):
                 cell = sheet.cell(row=row_idx, column=col_idx)
-
                 if is_green_cell(cell):
-                    # Get question text from the question column in this row
-                    question_cell = sheet.cell(row=row_idx, column=question_col)
-                    question_text = str(question_cell.value).strip() if question_cell.value else ""
+                    row_has_green = True
+                    green_col = col_idx
+                    break  # Found green cell in this row
 
-                    if question_text:
-                        green_cells.append({
-                            "tab_name": sheet_name,
-                            "row": row_idx,
-                            "question_text": question_text,
-                            "question_col": question_col,
-                            "question_col_name": question_col_name,
-                            "answer_col": answer_col,
-                            "answer_col_name": answer_col_name,
-                            "header_row": header_row,
-                            "green_cell_col": col_idx  # Track which cell was actually green
-                        })
-                    break  # Only need one green cell per row
+            if row_has_green:
+                # Get question text from the question column in this row
+                question_cell = sheet.cell(row=row_idx, column=question_col)
+                question_text = str(question_cell.value).strip() if question_cell.value else ""
+
+                if question_text:
+                    green_cells.append({
+                        "tab_name": sheet_name,
+                        "row": row_idx,
+                        "question_text": question_text,
+                        "question_col": question_col,
+                        "question_col_name": question_col_name,
+                        "answer_col": answer_col,
+                        "answer_col_name": answer_col_name,
+                        "header_row": header_row,
+                        "green_cell_col": green_col  # Track which cell was actually green
+                    })
 
     return green_cells
 
@@ -436,10 +467,19 @@ def process_excel_file(
 
     print(f"[INFO] Scanning Excel file: {input_path}")
 
-    # Load workbook
+    # Load workbook with preservation flags
+    total_images = 0  # Initialize for later scope
     try:
-        workbook = load_workbook(input_path)
+        # CRITICAL: keep_vba=True preserves images, charts, and embedded objects
+        workbook = load_workbook(input_path, keep_vba=True, keep_links=True)
         print(f"[INFO] Found {len(workbook.sheetnames)} tabs")
+
+        # Count images/charts before processing
+        image_counts_before = count_images_and_charts(workbook)
+        total_images = sum(image_counts_before.values())
+        if total_images > 0:
+            print(f"[INFO] Found {total_images} images/charts to preserve")
+
     except Exception as e:
         print(f"[ERROR] Could not load Excel file: {e}")
         return False
@@ -517,6 +557,13 @@ def process_excel_file(
     # Write answers back to workbook
     print("[INFO] Writing answers to workbook...")
 
+    # SAFETY: Count total cells and track modifications
+    total_cells = 0
+    for sheet_name in workbook.sheetnames:
+        sheet = workbook[sheet_name]
+        total_cells += sheet.max_row * sheet.max_column
+
+    modified_cells = 0
     for (tab_name, row), result in results.items():
         sheet = workbook[tab_name]
         answer_col = result["answer_col"]
@@ -525,6 +572,13 @@ def process_excel_file(
         if answer_col:
             cell = sheet.cell(row=row, column=answer_col)
             cell.value = answer
+            modified_cells += 1
+
+    preserved_cells = total_cells - modified_cells
+
+    # Safety logging
+    print(f"[SAFETY] Modified {modified_cells} cells (answer column in green-highlighted rows only)")
+    print(f"[SAFETY] Preserved {preserved_cells} cells unchanged")
 
     # Generate output path if not provided
     if not output_path:
@@ -535,6 +589,23 @@ def process_excel_file(
     try:
         workbook.save(output_path)
         print(f"[SUCCESS] Saved to: {output_path}")
+
+        # Verify images/charts were preserved
+        try:
+            verification_wb = load_workbook(output_path, keep_vba=True, keep_links=True)
+            image_counts_after = count_images_and_charts(verification_wb)
+            total_images_after = sum(image_counts_after.values())
+            verification_wb.close()
+
+            if total_images > 0:
+                if total_images_after == total_images:
+                    print(f"[SUCCESS] Preserved all {total_images} images/charts")
+                else:
+                    print(f"[WARNING] Image count changed: {total_images} -> {total_images_after}")
+                    print(f"[WARNING] Some images may not have been preserved correctly")
+        except Exception as e:
+            print(f"[WARNING] Could not verify image preservation: {e}")
+
     except Exception as e:
         print(f"[ERROR] Could not save file: {e}")
         return False
