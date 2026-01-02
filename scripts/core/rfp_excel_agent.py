@@ -470,8 +470,10 @@ def process_excel_file(
     # Load workbook with preservation flags
     total_images = 0  # Initialize for later scope
     try:
-        # CRITICAL: keep_vba=True preserves images, charts, and embedded objects
-        workbook = load_workbook(input_path, keep_vba=True, keep_links=True)
+        # keep_links=True preserves external links
+        # NOTE: keep_vba=True is ONLY for .xlsm files and corrupts .xlsx files
+        # openpyxl preserves images by default when cells are not modified
+        workbook = load_workbook(input_path, keep_links=True)
         print(f"[INFO] Found {len(workbook.sheetnames)} tabs")
 
         # Count images/charts before processing
@@ -592,7 +594,7 @@ def process_excel_file(
 
         # Verify images/charts were preserved
         try:
-            verification_wb = load_workbook(output_path, keep_vba=True, keep_links=True)
+            verification_wb = load_workbook(output_path, keep_links=True)
             image_counts_after = count_images_and_charts(verification_wb)
             total_images_after = sum(image_counts_after.values())
             verification_wb.close()
