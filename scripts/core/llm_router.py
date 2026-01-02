@@ -345,7 +345,7 @@ class LLMRouter:
         prompt = self.system_prompt_template.format(
             context=full_context,
             query=query
-        )Skoro uważasz, że problem jest w LLM router, to przeanalizuj go. Przeanalizuj ten plik.
+        )
 
         model_config = MODELS.get(model, MODELS["gemini"])
         provider = model_config["provider"]
