@@ -78,3 +78,8 @@ debug_*.py
 RFP_Cognitive_Agent_Documentation.docx
 ~$P_Cognitive_Agent_Documentation.docx
 rfp_system_prompt_v*.txt
+
+# Environment variables
+.env
+.env.local
+.env.*.local

@@ -41,6 +41,11 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT / "scripts/core"))
 
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv(PROJECT_ROOT / ".env")
+
 from llm_router import LLMRouter
 from anonymization import AnonymizationMiddleware
 

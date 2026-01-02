@@ -1,6 +1,11 @@
 import os
 import json
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 import chromadb
 from chromadb.utils import embedding_functions
 from google import genai
