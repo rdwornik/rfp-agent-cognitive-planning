@@ -438,6 +438,7 @@ def dry_run_report(input_path: str, workbook, green_cells: List[Dict]) -> None:
 
 def process_excel_file(
     input_path: str,
+    client: str,
     output_path: Optional[str],
     solution: Optional[str],
     model: str,
@@ -450,6 +451,7 @@ def process_excel_file(
 
     Args:
         input_path: Path to input Excel file
+        client: Client name for output filename
         output_path: Path to output file (or None for auto-generated)
         solution: Solution code for platform-aware context
         model: LLM model name
@@ -584,8 +586,16 @@ def process_excel_file(
 
     # Generate output path if not provided
     if not output_path:
-        input_file = Path(input_path)
-        output_path = str(input_file.parent / f"{input_file.stem}_RFP_AGENT_ANSWERED{input_file.suffix}")
+        # Format: {client}_{solution}_{model}_{YYYYMMDD}_{HHMM}.xlsx
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        solution_str = solution if solution else "generic"
+        output_filename = f"{client}_{solution_str}_{model}_{timestamp}.xlsx"
+
+        # Save to output_rfp_universal/
+        output_dir = Path("output_rfp_universal")
+        output_dir.mkdir(exist_ok=True)
+
+        output_path = str(output_dir / output_filename)
 
     # Save workbook
     try:
@@ -637,10 +647,12 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --input test.xlsx --dry-run
-  %(prog)s --input test.xlsx
-  %(prog)s --input test.xlsx --solution wms_native --model claude
-  %(prog)s --input "RFP_Customer.xlsx" --solution planning --model claude --anonymize --workers 8
+  %(prog)s --input test.xlsx --client acme --dry-run
+  %(prog)s --input test.xlsx --client acme --solution planning --model gemini
+  %(prog)s --input "RFP.xlsx" --client ifm --solution planning --model claude --anonymize
+
+Output: output_rfp_universal/{client}_{solution}_{model}_{YYYYMMDD}_{HHMM}.xlsx
+Example: output_rfp_universal/ifm_planning_gemini_20250102_1435.xlsx
         """
     )
 
@@ -652,10 +664,17 @@ Examples:
     )
 
     parser.add_argument(
+        "-c", "--client",
+        type=str,
+        required=True,
+        help="Client name for output filename (required)"
+    )
+
+    parser.add_argument(
         "-o", "--output",
         type=str,
         default=None,
-        help="Output file path (optional, default: {input}_RFP_AGENT_ANSWERED.xlsx)"
+        help="Output file path (optional, auto-generated if not provided)"
     )
 
     # Get available solutions dynamically
@@ -713,6 +732,7 @@ def main():
     print("RFP Excel Agent")
     print("=" * 60)
     print(f"[INFO] Input: {args.input}")
+    print(f"[INFO] Client: {args.client}")
     print(f"[INFO] Output: {args.output or 'Auto-generated'}")
     print(f"[INFO] Model: {args.model}")
     print(f"[INFO] Solution: {args.solution or 'None (generic)'}")
@@ -723,6 +743,7 @@ def main():
 
     success = process_excel_file(
         input_path=args.input,
+        client=args.client,
         output_path=args.output,
         solution=args.solution,
         model=args.model,
