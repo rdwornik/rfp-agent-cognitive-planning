@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Define project root and load .env file explicitly
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_PATH = PROJECT_ROOT / ".env"
+load_dotenv(ENV_PATH)
 
 import chromadb
 from chromadb.utils import embedding_functions
@@ -25,7 +27,6 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 # --- CONFIGURATION ---
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 KB_JSON_PATH = PROJECT_ROOT / "data_kb/canonical/RFP_Database_UNIFIED_CANONICAL.json"
 DB_PATH = PROJECT_ROOT / "data_kb/chroma_store"
 COLLECTION_NAME = "rfp_knowledge_base"

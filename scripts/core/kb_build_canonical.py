@@ -30,10 +30,13 @@ import threading
 import pandas as pd
 from google import genai
 from google.genai import errors as genai_errors, types
+from dotenv import load_dotenv
 
 # --- paths & constants -------------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # repo root
+ENV_PATH = PROJECT_ROOT / ".env"
+load_dotenv(ENV_PATH)
 RAW_KB_DIR = PROJECT_ROOT / "data_kb" / "raw"
 CANONICAL_KB_DIR = PROJECT_ROOT / "data_kb" / "canonical"
 
