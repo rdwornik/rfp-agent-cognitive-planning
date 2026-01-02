@@ -40,10 +40,10 @@ MODELS = {
     "gemini": {"name": "gemini-3-pro-preview", "provider": "google"},
     "gemini-flash": {"name": "gemini-3-flash-preview", "provider": "google"},
     # Anthropic
-    "claude": {"name": "claude-sonnet-4-20250514", "provider": "anthropic"},
-    "claude-opus": {"name": "claude-opus-4-20250514", "provider": "anthropic"},
+    "claude": {"name": "claude-sonnet-4-5", "provider": "anthropic"},
+    "claude-opus": {"name": "claude-opus-4-5", "provider": "anthropic"},
     # OpenAI
-    "gpt5": {"name": "gpt-5", "provider": "openai"},
+    "gpt5": {"name": "gpt-5.2", "provider": "openai"},
     "o3": {"name": "o3", "provider": "openai"},
     # xAI
     "grok": {"name": "grok-3-beta", "provider": "xai"},
