@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 # Define project root and load .env file explicitly
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ENV_PATH = PROJECT_ROOT / ".env"
-load_dotenv(ENV_PATH)
+load_dotenv(ENV_PATH, override=True)
 
 import chromadb
 from chromadb.utils import embedding_functions
@@ -385,7 +385,7 @@ class LLMRouter:
                 response = client.chat.completions.create(
                     model=model_name,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=4096,
+                    max_completion_tokens=4096,
                     temperature=0.3
                 )
                 return response.choices[0].message.content.strip()
