@@ -12,9 +12,9 @@ from chromadb.utils import embedding_functions
 from pathlib import Path
 
 # --- CONFIGURATION ---
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-KB_PATH = PROJECT_ROOT / "data_kb/canonical/RFP_Database_UNIFIED_CANONICAL.json"
-DB_PATH = str(PROJECT_ROOT / "data_kb/chroma_store")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+KB_PATH = PROJECT_ROOT / "data/kb/canonical/RFP_Database_UNIFIED_CANONICAL.json"
+DB_PATH = str(PROJECT_ROOT / "data/kb/chroma_store")
 COLLECTION_NAME = "rfp_knowledge_base"
 
 

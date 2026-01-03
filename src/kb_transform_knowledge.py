@@ -26,7 +26,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Tuple, List
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 # =============================================================================
@@ -447,7 +447,7 @@ def main():
     if args.output:
         output_path = Path(args.output)
     else:
-        output_path = PROJECT_ROOT / f"data_kb/canonical/RFP_Database_{args.domain.upper()}_CANONICAL.json"
+        output_path = PROJECT_ROOT / f"data/kb/canonical/RFP_Database_{args.domain.upper()}_CANONICAL.json"
     
     transform_knowledge(
         input_path=input_path,

@@ -38,8 +38,8 @@ except ImportError:
     OPENPYXL_AVAILABLE = False
 
 # --- PROJECT ROOT AND IMPORTS ---
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT / "scripts/core"))
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# No sys.path modification needed - imports are local in src/
 
 from dotenv import load_dotenv
 
@@ -630,8 +630,8 @@ def process_excel_file(
         solution_str = solution if solution else "generic"
         output_filename = f"{client}_{solution_str}_{model}_{timestamp}.xlsx"
 
-        # Save to output_rfp_universal/
-        output_dir = Path("output_rfp_universal")
+        # Save to data/output/
+        output_dir = Path("data/output")
         output_dir.mkdir(exist_ok=True)
 
         output_path = str(output_dir / output_filename)

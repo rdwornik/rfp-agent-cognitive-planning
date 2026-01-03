@@ -14,8 +14,8 @@ import argparse
 from pathlib import Path
 from typing import List, Tuple
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CANONICAL_DIR = PROJECT_ROOT / "data_kb/canonical"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_DIR = PROJECT_ROOT / "data/kb/canonical"
 
 # Default output file
 UNIFIED_KB = CANONICAL_DIR / "RFP_Database_UNIFIED_CANONICAL.json"

@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Define project root and load .env file explicitly
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(ENV_PATH, override=True)
 
@@ -27,12 +27,12 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 # --- CONFIGURATION ---
-KB_JSON_PATH = PROJECT_ROOT / "data_kb/canonical/RFP_Database_UNIFIED_CANONICAL.json"
-DB_PATH = PROJECT_ROOT / "data_kb/chroma_store"
+KB_JSON_PATH = PROJECT_ROOT / "data/kb/canonical/RFP_Database_UNIFIED_CANONICAL.json"
+DB_PATH = PROJECT_ROOT / "data/kb/chroma_store"
 COLLECTION_NAME = "rfp_knowledge_base"
-SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts_instructions/rfp_system_prompt_universal.txt"
+SYSTEM_PROMPT_PATH = PROJECT_ROOT / "prompts/rfp_system_prompt_universal.txt"
 PLATFORM_MATRIX_PATH = PROJECT_ROOT / "config/platform_matrix.json"
-PLATFORM_CONTEXT_PATH = PROJECT_ROOT / "prompts_instructions/platform_context.md"
+PLATFORM_CONTEXT_PATH = PROJECT_ROOT / "prompts/platform_context.md"
 DEBUG = os.environ.get("DEBUG_RAG", "0") == "1"  # Set DEBUG_RAG=1 to enable debug logging
 
 # --- MODEL REGISTRY ---

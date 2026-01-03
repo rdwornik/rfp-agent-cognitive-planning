@@ -68,23 +68,30 @@ rfp-answer-engine/
 │   ├── anonymization.yaml             # Blocklist and session config
 │   └── platform_matrix.json           # Platform services matrix (from Excel)
 │
-├── data_kb/
-│   ├── raw/                           # Source files (JSONL from workshops)
-│   │   └── knowledge_wms.jsonl
-│   ├── canonical/                     # Transformed KB files
-│   │   ├── RFP_Database_Cognitive_Planning_CANONICAL.json
-│   │   ├── RFP_Database_AIML_CANONICAL.json
-│   │   ├── RFP_Database_WMS_CANONICAL.json
-│   │   └── RFP_Database_UNIFIED_CANONICAL.json  # Merged
-│   └── chroma_store/                  # ChromaDB vector index
+├── data/
+│   ├── kb/
+│   │   ├── raw/                       # Source files (JSONL from workshops)
+│   │   │   └── knowledge_wms.jsonl
+│   │   ├── canonical/                 # Transformed KB files
+│   │   │   ├── RFP_Database_Cognitive_Planning_CANONICAL.json
+│   │   │   ├── RFP_Database_AIML_CANONICAL.json
+│   │   │   ├── RFP_Database_WMS_CANONICAL.json
+│   │   │   └── RFP_Database_UNIFIED_CANONICAL.json  # Merged
+│   │   └── chroma_store/              # ChromaDB vector index
+│   ├── input/                         # RFP input files (Excel/CSV)
+│   └── output/                        # Generated RFP answers
 │
-├── scripts/core/
-│   ├── rfp_batch_universal.py         # Main batch processor
+├── src/                               # Core Python modules
+│   ├── __init__.py
 │   ├── llm_router.py                  # Multi-LLM provider router
+│   ├── rfp_batch_universal.py         # Main batch processor
+│   ├── rfp_excel_agent.py             # Excel agent for green-cell processing
 │   ├── kb_build_canonical.py          # Build KB from raw sources
-│   ├── kb_transform_knowledge.py      # Transform JSONL → Canonical (NEW)
+│   ├── kb_transform_knowledge.py      # Transform JSONL -> Canonical
 │   ├── kb_merge_canonical.py          # Merge all KBs into unified
 │   ├── kb_embed_chroma.py             # Index to ChromaDB
+│   ├── excel_to_platform_matrix.py    # Convert Excel to platform_matrix.json
+│   ├── solution_filter.py             # Solution filtering utilities
 │   └── anonymization/                 # Anonymization package
 │       ├── __init__.py
 │       ├── config.py                  # YAML loader
@@ -93,46 +100,70 @@ rfp-answer-engine/
 │       ├── scan_kb.py                 # CLI: scan KB for sensitive terms
 │       └── clean_kb.py                # CLI: clean KB with backup
 │
-├── logs/
-│   └── anonymization.log              # Audit trail
+├── scripts/                           # Utility scripts
+│   ├── test_api_keys.py               # Test API key connectivity
+│   ├── debug_rag_retrieval.py         # Debug RAG retrieval
+│   └── check_api_keys.py              # Check API key presence
 │
-└── outputs/                           # Generated RFP answers
+├── prompts/                           # Prompt templates
+│   ├── rfp_system_prompt_universal.txt
+│   ├── platform_context.md
+│   └── kb_distiller_prompt.txt
+│
+├── docs/                              # Documentation
+│   ├── BUGFIX_NOT_IN_KB.md
+│   └── KB_WORKFLOW.md
+│
+└── tests/                             # Test files
 ```
 
 ## Key Commands
 
 ```bash
 # Transform new knowledge from workshops
-python scripts/core/kb_transform_knowledge.py \
-    --input data_kb/raw/knowledge_wms.jsonl \
+python src/kb_transform_knowledge.py \
+    --input data/kb/raw/knowledge_wms.jsonl \
     --domain wms \
     --source-type video_workshop \
     --version 2025.1
 
 # Append more knowledge to existing KB
-python scripts/core/kb_transform_knowledge.py \
-    --input data_kb/raw/knowledge_wms_session2.jsonl \
+python src/kb_transform_knowledge.py \
+    --input data/kb/raw/knowledge_wms_session2.jsonl \
     --domain wms \
     --append
 
 # Merge all KBs
-python scripts/core/kb_merge_canonical.py
+python src/kb_merge_canonical.py
 
 # Re-index to ChromaDB
-python scripts/core/kb_embed_chroma.py
+python src/kb_embed_chroma.py
 
 # Run batch processor
-python scripts/core/rfp_batch_universal.py \
+python src/rfp_batch_universal.py \
     --test \
     --model gemini \
     --anonymize \
     --workers 4
 
+# Run Excel agent
+python src/rfp_excel_agent.py \
+    --input "RFP.xlsx" \
+    --client acme \
+    --solution planning \
+    --model gemini
+
 # Scan KB for sensitive terms
-python -m scripts.core.anonymization.scan_kb
+python -m src.anonymization.scan_kb
 
 # Clean KB (dry run first!)
-python -m scripts.core.anonymization.clean_kb --dry-run
+python -m src.anonymization.clean_kb --dry-run
+
+# Test API keys
+python scripts/test_api_keys.py
+
+# Debug RAG retrieval
+python scripts/debug_rag_retrieval.py "your question here"
 ```
 
 ## Environment Variables
@@ -190,6 +221,17 @@ XAI_API_KEY=...          # Grok
 - [ ] Add more WMS knowledge from additional workshops
 
 ## Recent Changes
+
+### 2026-01-03
+- **REFACTOR:** Complete project restructure for clean architecture
+  - Created new directory structure: `data/`, `src/`, `scripts/`, `prompts/`, `tests/`
+  - Moved core scripts from `scripts/core/` to `src/`
+  - Moved KB data from `data_kb/` to `data/kb/`
+  - Moved prompts from `prompts_instructions/` to `prompts/`
+  - Moved utility scripts from `scripts/utils/` to `scripts/`
+  - Deleted legacy folders: `scripts/archive/`, `scripts/custom/`, `scripts/maintenance/`, `logs/`
+  - Updated all import paths and PROJECT_ROOT calculations
+  - Updated `.gitignore` for new paths
 
 ### 2025-01-01
 - **FEATURE:** Solution-aware response system with platform service context

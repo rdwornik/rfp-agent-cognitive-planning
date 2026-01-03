@@ -34,11 +34,11 @@ from dotenv import load_dotenv
 
 # --- paths & constants -------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  # repo root
+PROJECT_ROOT = Path(__file__).resolve().parents[1]  # repo root
 ENV_PATH = PROJECT_ROOT / ".env"
 load_dotenv(ENV_PATH)
-RAW_KB_DIR = PROJECT_ROOT / "data_kb" / "raw"
-CANONICAL_KB_DIR = PROJECT_ROOT / "data_kb" / "canonical"
+RAW_KB_DIR = PROJECT_ROOT / "data" / "kb" / "raw"
+CANONICAL_KB_DIR = PROJECT_ROOT / "data" / "kb" / "canonical"
 
 RAW_CSV_PATH = RAW_KB_DIR / "RFP_Database_AIML.csv"
 
@@ -48,7 +48,7 @@ CANONICAL_JSON_PATH = (
 CANONICAL_CSV_PATH = CANONICAL_KB_DIR / "RFP_Database_AIML_CANONICAL.csv"
 
 DISTILLER_PROMPT_PATH = (
-    PROJECT_ROOT / "prompts_instructions" / "kb_distiller_prompt.txt"
+    PROJECT_ROOT / "prompts" / "kb_distiller_prompt.txt"
 )
 
 # Allow long, rich answers. You can bump further if needed.

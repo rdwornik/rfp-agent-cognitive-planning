@@ -23,7 +23,7 @@ from llm_router import LLMRouter
 from anonymization import AnonymizationMiddleware  # NEW
 
 # --- PROJECT ROOT AND PLATFORM MATRIX ---
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PLATFORM_MATRIX_PATH = PROJECT_ROOT / "config/platform_matrix.json"
 
 
@@ -189,7 +189,7 @@ def process_file(file_path, router, model, max_workers, middleware):
         "answer": results
     })
     
-    output_dir = "output_rfp_universal/"
+    output_dir = "data/output/"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
@@ -215,7 +215,7 @@ def process_file(file_path, router, model, max_workers, middleware):
 def main():
     args = parse_args()
     
-    input_dir = "input_rfp_test/" if args.test else "input_rfp/"
+    input_dir = "data/input/" if args.test else "data/input/"
     
     # Initialize middleware
     middleware = AnonymizationMiddleware(enabled=args.anonymize)

@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple, Any
 
 
 # Default paths
-DEFAULT_INPUT = Path("data_kb/raw/Platform_Usage_by_Product.xlsx")
+DEFAULT_INPUT = Path("data/kb/raw/Platform_Usage_by_Product.xlsx")
 DEFAULT_OUTPUT = Path("config/platform_matrix.json")
 SHEET_NAME = "Usage by Product"
 
